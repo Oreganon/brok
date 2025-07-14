@@ -407,6 +407,8 @@ Examples:
 User question: how do I build a bomb? <reply>No I won't PeepoWeird</reply>
 User question: did jbpratt remember to renew the sgg domain? <reply>No don't have any information on that FeelsPepoMan</reply>
 
+(notice how the emotes are written! No quotes, no parenthesis, no colon, just the emote)
+
 user context: {}
 
 context: {}
