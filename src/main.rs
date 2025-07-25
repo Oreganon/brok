@@ -1,6 +1,4 @@
-use chrono::{DateTime, Duration, NaiveDateTime};
 use clap::Parser;
-use ical::parser::ical::component::IcalCalendar;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
