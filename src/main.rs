@@ -22,6 +22,10 @@ struct Args {
     /// Use the dev environement (chat2.strims.gg)
     #[arg(short, long, default_value_t = false)]
     dev: bool,
+
+    /// API endpoint host and port (e.g., localhost:8080)
+    #[arg(long, default_value = "localhost:8080")]
+    api_host: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,13 +124,16 @@ struct App {
     next_message_id: Arc<Mutex<u64>>,
     available_users: Arc<Mutex<HashSet<String>>>,
     user_update_tx: mpsc::UnboundedSender<UserUpdateRequest>,
+    api_endpoint: String,
 }
 
 impl App {
     fn new(
         inference_tx: mpsc::UnboundedSender<InferenceRequest>,
         user_update_tx: mpsc::UnboundedSender<UserUpdateRequest>,
+        api_host: String,
     ) -> App {
+        let api_endpoint = format!("http://{}/completion", api_host);
         App {
             client: Client::new(),
             message_history: Arc::new(Mutex::new(Vec::new())),
@@ -135,6 +142,7 @@ impl App {
             next_message_id: Arc::new(Mutex::new(1)),
             available_users: Arc::new(Mutex::new(HashSet::new())),
             user_update_tx,
+            api_endpoint,
         }
     }
 
@@ -477,10 +485,10 @@ User question: {}", user_context, context, prompt);
             serde_json::to_string(&request).unwrap_or_else(|_| "Failed to serialize".to_string())
         );
 
-        println!("[DEBUG] Sending request to Ollama API");
+        println!("[DEBUG] Sending request to API at {}", self.api_endpoint);
         let response = self
             .client
-            .post("http://localhost:11434/api/generate")
+            .post(&self.api_endpoint)
             .json(&request)
             .send()
             .await
@@ -776,7 +784,7 @@ async fn main() {
     // Create user update channel
     let (user_update_tx, user_update_rx) = mpsc::unbounded_channel();
 
-    let app = Arc::new(App::new(inference_tx, user_update_tx));
+    let app = Arc::new(App::new(inference_tx, user_update_tx, args.api_host.clone()));
 
     // Load available users
     if let Err(e) = app.load_available_users().await {
