@@ -113,7 +113,7 @@ class XMLPromptTemplate(PromptTemplate):
         """Build XML-formatted prompt structure.
 
         Creates structured XML with clear semantic boundaries:
-        - <system>: System instructions
+        - <instructions>: System instructions and response guidelines
         - <tools>: Available tools and usage instructions
         - <context>: Conversation history
         - <request>: Current user input and response prompt
@@ -132,8 +132,13 @@ class XMLPromptTemplate(PromptTemplate):
 
         # Add system section if provided
         if self.system_prompt.strip():
-            system_elem = ET.SubElement(root, "system", role="assistant", name="brok")
-            system_elem.text = self.system_prompt.strip()
+            system_elem = ET.SubElement(
+                root, "instructions", role="assistant", name="brok"
+            )
+            # Add XML response guidance to prevent XML bleeding in responses
+            enhanced_prompt = self.system_prompt.strip()
+            enhanced_prompt += "\n\nIMPORTANT: Respond only in plain text. Do not include any XML tags or markup in your response."
+            system_elem.text = enhanced_prompt
 
         # Add tools section if provided (KEP-002 Increment C)
         if tool_schemas:

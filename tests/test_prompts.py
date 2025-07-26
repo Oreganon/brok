@@ -347,7 +347,9 @@ class TestXMLPromptTemplate:
 
         # Assert
         assert result.startswith('<prompt version="1.0">')
-        assert '<system role="assistant" name="brok">You are brok</system>' in result
+        assert '<instructions role="assistant" name="brok">' in result
+        assert "You are brok" in result
+        assert "Respond only in plain text" in result
         assert "<user_input>Hello</user_input>" in result
         assert "<response_prompt>AI:</response_prompt>" in result
         assert "</prompt>" in result
@@ -408,7 +410,9 @@ class TestXMLPromptTemplate:
 
         # Assert
         # Check all sections are present
-        assert '<system role="assistant" name="brok">You are helpful</system>' in result
+        assert '<instructions role="assistant" name="brok">' in result
+        assert "You are helpful" in result
+        assert "Respond only in plain text" in result
         assert '<tools count="1">' in result
         assert (
             '<context window_size="10" format="legacy">Chat history here</context>'
@@ -847,6 +851,7 @@ class TestStructuredToolsIntegration:
 
     def test_llm_provider_get_tools_schema_integration(self):
         """Test integration between ToolRegistry, LLMProvider, and XMLPromptTemplate."""
+
         # Create a simple test tool
         class TestTool(BaseTool):
             name: ClassVar[str] = "test_tool"
