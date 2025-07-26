@@ -1,0 +1,102 @@
+---
+globs: "Dockerfile*,.dockerignore"
+description: "Docker containerization standards and distroless best practices"
+---
+
+# Docker Standards & Best Practices
+
+## Dockerfile Structure
+
+### Multi-stage Builds
+- Use multi-stage builds to minimize final image size
+- Build stage: Install dependencies and build artifacts
+- Runtime stage: Copy only necessary artifacts using distroless base
+
+### Base Images
+- **Distroless**: Use `gcr.io/distroless/python3-debian12:latest` for production
+- **Builder**: Use `python:3.13-slim` for build stage (smaller than full python image)
+- Always specify exact versions for reproducible builds
+
+### Layer Optimization
+- Copy `pyproject.toml` before source code for better caching
+- Combine `RUN` commands to reduce layers
+- Clean up package managers in the same layer (`rm -rf /var/lib/apt/lists/*`)
+- Use `--no-cache-dir` with pip to avoid cache in layers
+
+### Security Best Practices
+- Run as non-root user when possible (distroless runs as nobody by default)
+- Use specific versions for all base images
+- Minimize installed packages and dependencies
+- Use `.dockerignore` to exclude sensitive files
+
+## Dockerfile Example Structure
+```dockerfile
+# Build stage
+FROM python:3.13-slim as builder
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml .
+RUN pip install --no-cache-dir --user .
+
+# Runtime stage
+FROM gcr.io/distroless/python3-debian12:latest
+COPY --from=builder /root/.local /root/.local
+COPY main.py /app/
+WORKDIR /app
+ENV PATH=/root/.local/bin:$PATH
+ENTRYPOINT ["python", "main.py"]
+```
+
+## .dockerignore Configuration
+
+### Essential Exclusions
+- Version control files (`.git/`, `.gitignore`)
+- Development files (IDE configs, documentation)
+- Build artifacts and caches
+- Virtual environments
+- Test files and reports
+- CI/CD configurations
+
+### Security Exclusions
+- Never include secrets, keys, or sensitive configuration
+- Exclude security scan reports
+- Exclude temporary and cache files
+
+## Container Registry & CI/CD
+
+### GitHub Container Registry
+- Use `ghcr.io` for GitHub-hosted projects
+- Authenticate with `GITHUB_TOKEN` 
+- Set proper permissions: `packages: write, contents: read`
+
+### Multi-platform Builds
+- Build for `linux/amd64` and `linux/arm64`
+- Use Docker Buildx for cross-platform support
+- Enable GitHub Actions cache for faster builds
+
+### Tagging Strategy
+- `latest` for main/master branch
+- Branch name for feature branches
+- SHA prefix for specific commits
+- PR numbers for pull requests
+
+### Build Optimization
+- Use GitHub Actions cache (`cache-from/cache-to: type=gha`)
+- Only push images on non-PR events
+- Run Docker job after all tests pass (`needs: [lint-and-type-check, test, security]`)
+
+## Runtime Considerations
+
+### Environment Variables
+- Set `PYTHONPATH` appropriately
+- Configure `PATH` to include user-installed packages
+- Use environment variables for configuration, not hardcoded values
+
+### Health Checks
+- Add health check endpoints when building web applications
+- Use minimal health check commands in distroless images
+
+### Resource Limits
+- Consider setting appropriate resource limits in production
+- Test memory usage with realistic workloads

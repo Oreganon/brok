@@ -1,0 +1,72 @@
+---
+globs: "*.py"
+description: "Python coding standards, typing, and testing guidelines"
+---
+
+# Python Code Standards
+
+## Type Hints & Annotations
+- **Always** use type hints for function parameters and return types
+- Use `from __future__ import annotations` for forward references
+- Import types from `typing` when needed (`List`, `Dict`, `Optional`, `Union`, etc.)
+- Use `TypeVar` for generic types when appropriate
+- Document complex types with type aliases
+
+Example:
+```python
+from __future__ import annotations
+from typing import Optional, Dict, List
+
+def process_data(items: List[str], config: Optional[Dict[str, str]] = None) -> Dict[str, int]:
+    """Process a list of items with optional configuration."""
+    # Implementation here
+    pass
+```
+
+## Error Handling
+- Use specific exception types, not broad `except Exception`
+- Create custom exceptions when appropriate
+- Always include meaningful error messages
+- Use logging instead of print statements for debugging
+
+## Function & Class Design
+- Keep functions focused on a single responsibility
+- Use descriptive names that explain the purpose
+- Limit function parameters (max 5, prefer data classes for more)
+- Write comprehensive docstrings with examples
+- Use `@dataclass` for simple data containers
+
+## Testing Requirements
+- Write tests for **all** public functions and methods
+- Use descriptive test names that explain the scenario
+- Follow the Arrange-Act-Assert pattern
+- Test both happy path and edge cases
+- Aim for >90% code coverage
+
+Example test:
+```python
+def test_process_data_with_valid_input_returns_expected_result():
+    # Arrange
+    items = ["apple", "banana", "cherry"]
+    expected = {"apple": 5, "banana": 6, "cherry": 6}
+    
+    # Act
+    result = process_data(items)
+    
+    # Assert
+    assert result == expected
+```
+
+## Import Organization
+- Standard library imports first
+- Third-party imports second  
+- Local application imports last
+- Use absolute imports when possible
+- Group related imports and separate with blank lines
+
+## Performance & Best Practices
+- Use list comprehensions and generator expressions when appropriate
+- Prefer `pathlib.Path` over `os.path` for file operations
+- Use context managers (`with` statements) for resource management
+- Cache expensive computations with `@functools.lru_cache`
+- Use `logging` module instead of print statements

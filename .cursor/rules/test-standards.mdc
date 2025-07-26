@@ -1,0 +1,84 @@
+---
+globs: "test_*.py,*_test.py,tests/*.py"
+description: "Testing standards and best practices for test files"
+---
+
+# Testing Standards & Best Practices
+
+## Test File Organization
+- Test files should mirror the source code structure
+- Name test files with `test_` prefix or `_test` suffix
+- Group related tests in test classes when appropriate
+- Use descriptive test method names that explain the scenario
+
+## Test Structure
+- Follow the **Arrange-Act-Assert** (AAA) pattern
+- Each test should test **one specific behavior**
+- Keep tests **independent** - no shared state between tests
+- Use **fixtures** for common setup/teardown
+
+Example:
+```python
+import pytest
+from your_module import YourClass
+
+class TestYourClass:
+    @pytest.fixture
+    def sample_instance(self):
+        """Provide a sample instance for testing."""
+        return YourClass(config={"setting": "value"})
+    
+    def test_method_with_valid_input_returns_expected_result(self, sample_instance):
+        # Arrange
+        input_data = "valid_input"
+        expected_output = "expected_result"
+        
+        # Act
+        result = sample_instance.method(input_data)
+        
+        # Assert
+        assert result == expected_output
+```
+
+## Test Coverage Requirements
+- Aim for **>90% code coverage**
+- Test **happy path** scenarios
+- Test **edge cases** and **error conditions**
+- Test **boundary values** (empty inputs, large inputs, etc.)
+- Mock external dependencies and I/O operations
+
+## Parametrized Tests
+- Use `@pytest.mark.parametrize` for testing multiple inputs
+- Keep parameter names descriptive
+- Include edge cases in parametrized tests
+
+Example:
+```python
+@pytest.mark.parametrize("input_value,expected", [
+    ("hello", 5),
+    ("", 0),
+    ("hello world", 11),
+    ("   spaces   ", 11),
+])
+def test_count_characters_with_various_inputs(input_value, expected):
+    result = count_characters(input_value)
+    assert result == expected
+```
+
+## Mock & Patch Guidelines
+- Mock **external dependencies** (API calls, database, file I/O)
+- Use `unittest.mock` or `pytest-mock` for mocking
+- Verify that mocks are called with expected arguments
+- Don't mock the code under test
+
+## Test Data Management
+- Use **factories** or **builders** for complex test data
+- Store test data in separate files when appropriate
+- Use **temporary directories** for file system tests
+- Clean up test artifacts in teardown methods
+
+## Performance Testing
+- Use `pytest-benchmark` for performance tests when needed
+- Test for memory leaks in long-running operations
+- Set reasonable timeout limits for tests
+- Mark slow tests with `@pytest.mark.slow`
