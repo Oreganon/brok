@@ -4,22 +4,37 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 
-from wsggpy import AsyncSession, ChatEnvironment, Message, RoomAction
+from brok import __version__
+from brok.bot import ChatBot
+from brok.chat import ChatClient, create_default_filters
+from brok.config import BotConfig
+from brok.exceptions import ConfigurationError
+from brok.llm.base import LLMConfig
+from brok.llm.ollama import OllamaProvider
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Connect to strims.gg chat",
+        description="Brok - AI chatbot for strims.gg chat integration",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py                    # Connect to production (anonymous)
-  python main.py --dev              # Connect to development chat
-  python main.py --jwt TOKEN        # Connect with specific JWT token
-  python main.py --dev --jwt TOKEN  # Connect to dev with authentication
+  python main.py                    # Start bot in production (anonymous)
+  python main.py --dev              # Start bot in development chat
+  python main.py --jwt TOKEN        # Start bot with authentication
+  python main.py --dev --jwt TOKEN  # Start bot in dev with auth
+
+Environment Variables:
+  STRIMS_JWT          JWT token for authentication
+  LLM_PROVIDER        LLM provider (default: ollama)
+  LLM_MODEL           Model name (default: llama3.2:3b)
+  LLM_BASE_URL        LLM API URL (default: http://localhost:11434)
+  BOT_KEYWORDS        Trigger keywords (default: !bot,!ask)
+  LOG_LEVEL           Logging level (default: INFO)
         """,
     )
 
@@ -39,66 +54,94 @@ Examples:
 
 
 async def main() -> None:
-    """Main entry point for the brok application."""
+    """Main entry point for the brok chatbot application."""
     args = parse_args()
 
-    # Determine environment
-    environment = ChatEnvironment.DEV if args.dev else ChatEnvironment.PRODUCTION
-    env_name = "development" if args.dev else "production"
+    try:
+        # Load configuration from environment
+        config = BotConfig.from_env()
 
-    print(f"Connecting to strims.gg {env_name} chat...")
+        # Override config with command line arguments
+        if args.dev:
+            config.chat_environment = "dev"
+        if args.jwt:
+            config.jwt_token = args.jwt
 
-    # Load JWT token (command line flag overrides environment variable)
-    jwt_token = args.jwt or os.getenv("STRIMS_JWT")
+        # Set up logging
+        setup_logging(config.log_level, config.log_chat_messages)
 
-    # Create async session
-    session = AsyncSession(
-        login_key=jwt_token,  # Will be None if not set (anonymous mode)
-        url=environment,
-    )
+        logger = logging.getLogger(__name__)
+        logger.info(f"Starting brok chatbot v{__version__}")
+        logger.info(f"Environment: {config.chat_environment}")
+        logger.info(f"LLM Provider: {config.llm_provider} ({config.llm_model})")
 
-    if jwt_token:
-        print(f"🔑 Using authenticated connection to {env_name}")
-    else:
-        print(f"👤 Using anonymous connection to {env_name}")
-        print(
-            "   (use --jwt TOKEN or set STRIMS_JWT environment variable to authenticate)"
+        # Create message filters
+        filters = create_default_filters(config.respond_to_keywords)
+
+        # Create chat client
+        chat_client = ChatClient(
+            response_filters=filters,
+            context_window_size=config.context_window_size,
         )
 
-    # Add message handler to print incoming messages
-    @session.add_message_handler
-    def on_message(message: Message, _session: AsyncSession) -> None:
-        print(f"[{message.sender.nick}]: {message.message}")
+        # Create LLM provider
+        if config.llm_provider == "ollama":
+            llm_config = LLMConfig(
+                model_name=config.llm_model,
+                max_tokens=config.llm_max_tokens,
+                temperature=config.llm_temperature,
+                timeout_seconds=config.llm_timeout_seconds,
+            )
+            llm_provider = OllamaProvider(
+                base_url=config.llm_base_url,
+                model=config.llm_model,
+                config=llm_config,
+            )
+        else:
+            raise ConfigurationError(f"Unsupported LLM provider: {config.llm_provider}")
 
-    # Add join/quit handlers
-    @session.add_join_handler
-    def on_join(event: RoomAction, _session: AsyncSession) -> None:
-        print(f"👋 {event.user.nick} joined the chat")
+        # Create and start the bot
+        bot = ChatBot(
+            config=config,
+            chat_client=chat_client,
+            llm_provider=llm_provider,
+        )
 
-    @session.add_quit_handler
-    def on_quit(event: RoomAction, _session: AsyncSession) -> None:
-        print(f"👋 {event.user.nick} left the chat")
+        await bot.start()
 
-    try:
-        # Connect to chat
-        await session.open()
-        print(f"✅ Connected to {env_name} chat! Listening for messages...")
-        if jwt_token:
-            print("💬 You can send messages since you're authenticated")
-        print("Press Ctrl+C to disconnect")
-
-        # Keep the connection alive and listen for messages
-        while session.is_connected():
-            await asyncio.sleep(1)
-
+    except ConfigurationError as e:
+        print(f"❌ Configuration error: {e}")
+        return
     except KeyboardInterrupt:
-        print("\n🛑 Disconnecting...")
+        print("\n🛑 Interrupted by user")
     except Exception as e:
-        print(f"❌ Error: {e}")
-    finally:
-        if session.is_connected():
-            await session.close()
-        print("👋 Disconnected from chat")
+        print(f"❌ Unexpected error: {e}")
+        logging.getLogger(__name__).exception("Unexpected error in main")
+
+
+def setup_logging(level: str, log_chat_messages: bool) -> None:
+    """Configure logging for the application.
+
+    Args:
+        level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_chat_messages: Whether to log chat messages
+    """
+    import sys
+
+    # Configure root logger
+    logging.basicConfig(
+        level=getattr(logging, level.upper()),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        stream=sys.stdout,
+    )
+
+    # Configure library loggers
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    logging.getLogger("wsggpy").setLevel(logging.INFO)
+
+    # Optionally silence chat message logging for privacy
+    if not log_chat_messages:
+        logging.getLogger("brok.chat").setLevel(logging.WARNING)
 
 
 if __name__ == "__main__":
