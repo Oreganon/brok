@@ -1,15 +1,19 @@
 [project]
 name = "brok"
 version = "0.1.0"
-description = "Add your description here"
+description = "A chatbot that integrates strims chat with LLM capabilities"
 requires-python = ">=3.13"
-dependencies = ["wsggpy @ git+https://github.com/MemeLabs/wsggpy.git"]
+dependencies = [
+    "wsggpy @ git+https://github.com/MemeLabs/wsggpy.git",
+    "aiohttp>=3.9.0",
+]
 
 [project.optional-dependencies]
 dev = [
     "ruff>=0.4.0",
     "mypy>=1.8.0",
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.12.0",
     "pre-commit>=3.6.0",
@@ -50,6 +54,10 @@ ignore = [
     "PLR0913", # too many arguments to function call
     "PLR0912", # too many branches
     "PLR0915", # too many statements
+    "TRY003", # avoid specifying long messages outside exception class - reasonable for config validation
+    "TRY300", # consider moving statement to else block - not always clearer
+    "TRY301", # abstract raise to inner function - overkill for simple validation
+    "PLR2004", # magic value in comparison - acceptable for test constants
 ]
 
 [tool.ruff.format]
@@ -92,6 +100,7 @@ omit = [
     "*/.venv/*",
     "*/build/*",
     "*/dist/*",
+    "main.py",  # Entry point script, not core library code
 ]
 
 [tool.coverage.report]
