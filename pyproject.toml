@@ -2,9 +2,8 @@
 name = "brok"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["wsggpy @ git+https://github.com/MemeLabs/wsggpy.git"]
 
 [project.optional-dependencies]
 dev = [
@@ -19,6 +18,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.ruff]
 target-version = "py313"
