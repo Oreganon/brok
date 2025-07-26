@@ -298,9 +298,9 @@ class TestChatClient:
     async def test_add_message_to_context(self, chat_client: ChatClient):
         """Test adding messages to context window."""
         # Act - Add messages
-        await chat_client.add_message_to_context("Hello", "user1")
-        await chat_client.add_message_to_context("Hi there", "user2")
-        await chat_client.add_message_to_context("How are you?", "user1")
+        await chat_client.add_message_to_context("Hello", "user1", is_bot=False)
+        await chat_client.add_message_to_context("Hi there", "user2", is_bot=False)
+        await chat_client.add_message_to_context("How are you?", "user1", is_bot=False)
 
         # Assert
         context = chat_client.get_context()
@@ -324,7 +324,7 @@ class TestChatClient:
 
         # Act - Add all messages
         for message, sender in messages:
-            await chat_client.add_message_to_context(message, sender)
+            await chat_client.add_message_to_context(message, sender, is_bot=False)
 
         # Assert - Only last 5 messages should be in context
         context = chat_client.get_context()
@@ -559,6 +559,87 @@ class TestChatClient:
                 assert message_type == "mention", (
                     f"Expected 'mention' type for {sender}"
                 )
+
+    @pytest.mark.asyncio
+    async def test_enhanced_context_feature_flag(self) -> None:
+        """Test that enhanced context feature flag works correctly (KEP-001 Increment A)."""
+        from brok.chat import ChatClient, create_default_filters, ContextMessage
+        
+        # Test enhanced context enabled
+        enhanced_client = ChatClient(
+            response_filters=create_default_filters(["!bot", "!test"]),
+            context_window_size=3,
+            enhanced_context=True,
+            include_bot_responses=True,
+        )
+        
+        # Add messages
+        await enhanced_client.add_message_to_context("Hello", "user1", is_bot=False)
+        await enhanced_client.add_message_to_context("Hi back", "brok", is_bot=True)
+        await enhanced_client.add_message_to_context("How are you?", "user1", is_bot=False)
+        
+        # Check that structured storage is used
+        assert len(enhanced_client._context_messages_structured) == 3
+        assert len(enhanced_client._context_messages_legacy) == 0
+        
+        # Check that context output is correctly formatted
+        context = enhanced_client.get_context()
+        assert context is not None
+        assert "user1: Hello" in context
+        assert "brok: Hi back" in context
+        assert "user1: How are you?" in context
+        
+        # Test legacy context (enhanced_context=False)
+        legacy_client = ChatClient(
+            response_filters=create_default_filters(["!bot", "!test"]),
+            context_window_size=3,
+            enhanced_context=False,
+        )
+        
+        # Add same messages
+        await legacy_client.add_message_to_context("Hello", "user1", is_bot=False)
+        await legacy_client.add_message_to_context("Hi back", "brok", is_bot=True)
+        await legacy_client.add_message_to_context("How are you?", "user1", is_bot=False)
+        
+        # Check that legacy storage is used
+        assert len(legacy_client._context_messages_structured) == 0
+        assert len(legacy_client._context_messages_legacy) == 3
+        
+        # Check that context output is identical (backward compatibility)
+        legacy_context = legacy_client.get_context()
+        assert legacy_context is not None
+        assert "user1: Hello" in legacy_context
+        assert "brok: Hi back" in legacy_context
+        assert "user1: How are you?" in legacy_context
+
+    @pytest.mark.asyncio
+    async def test_enhanced_context_include_bot_responses_setting(self) -> None:
+        """Test include_bot_responses setting in enhanced context mode (KEP-001)."""
+        from brok.chat import ChatClient, create_default_filters
+        
+        # Test with include_bot_responses=False
+        client = ChatClient(
+            response_filters=create_default_filters(["!bot", "!test"]),
+            context_window_size=5,
+            enhanced_context=True,
+            include_bot_responses=False,
+        )
+        
+        # Add user and bot messages
+        await client.add_message_to_context("Hello", "user1", is_bot=False)
+        await client.add_message_to_context("Hi there!", "brok", is_bot=True)
+        await client.add_message_to_context("How are you?", "user1", is_bot=False)
+        await client.add_message_to_context("I'm doing well!", "brok", is_bot=True)
+        
+        # All messages should be stored
+        assert len(client._context_messages_structured) == 4
+        
+        # But bot messages should be filtered out of context output
+        context = client.get_context()
+        assert context is not None
+        assert "user1: Hello" in context
+        assert "user1: How are you?" in context
+        assert "brok:" not in context
 
 
 class TestDefaultFilters:

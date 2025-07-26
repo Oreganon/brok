@@ -115,6 +115,10 @@ async def main() -> None:
             respond_to_mentions=config.respond_to_mentions,
             respond_to_commands=config.respond_to_commands,
             ignore_users=config.ignore_users,
+            enhanced_context=config.enhanced_context,
+            max_context_tokens=config.max_context_tokens,
+            prioritize_mentions=config.prioritize_mentions,
+            include_bot_responses=config.include_bot_responses,
         )
 
         # Create prompt template based on configuration
