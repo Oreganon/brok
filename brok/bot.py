@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 import logging
+import re
 import sys
 import time
 from typing import TYPE_CHECKING, Any
@@ -205,6 +206,52 @@ class ChatBot:
             # Continue without tools if setup fails
             logger.warning("Continuing without tool support")
 
+    def _strip_xml_tags(self, response: str) -> str:
+        """Strip XML tags from LLM response.
+
+        Removes common XML tags that might leak through from XML prompt formatting.
+        This is a best-effort cleanup to handle cases where the LLM includes XML
+        markup in its response despite instructions not to.
+
+        Args:
+            response: The raw LLM response
+
+        Returns:
+            str: Response with XML tags removed
+        """
+        if not response:
+            return response or ""
+
+        # Remove common XML tags that might appear in responses
+        # Match opening and closing tags, including self-closing tags
+        xml_pattern = r"<[^>]+>"
+
+        # First pass: Remove obvious XML tags
+        cleaned = re.sub(xml_pattern, "", response)
+
+        # Second pass: Clean up any remaining XML-like patterns
+        # Remove XML declarations, CDATA sections, etc.
+        cleaned = re.sub(r"<!\[CDATA\[.*?\]\]>", "", cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r"<\?xml[^>]*\?>", "", cleaned)
+        cleaned = re.sub(r"<!--.*?-->", "", cleaned, flags=re.DOTALL)
+
+        # Third pass: Handle malformed XML that might have spaces
+        cleaned = re.sub(r"<\s*[^>]*\s*>", "", cleaned)
+
+        # Clean up extra whitespace that might be left after tag removal
+        cleaned = re.sub(r"\n\s*\n", "\n", cleaned)  # Multiple empty lines
+        cleaned = cleaned.strip()
+
+        # Log if we actually stripped anything for debugging
+        if cleaned != response:
+            logger.debug(
+                f"Stripped XML tags from response. Original length: {len(response)}, cleaned length: {len(cleaned)}"
+            )
+            logger.debug(f"First 100 chars of original: {response[:100]}")
+            logger.debug(f"First 100 chars of cleaned: {cleaned[:100]}")
+
+        return cleaned
+
     async def _process_response_with_tools(self, response: str, sender: str) -> str:
         """Process LLM response for tool calls and execute them.
 
@@ -215,6 +262,9 @@ class ChatBot:
         Returns:
             str: Final response to send to chat (may include tool results)
         """
+        # First, strip any XML tags that might have leaked through
+        response = self._strip_xml_tags(response)
+
         # Log the response for debugging tool parsing issues
         logger.debug(
             f"Processing response for tools from {sender}: {response[:100]}..."

@@ -444,6 +444,150 @@ class TestChatBot:
         assert stats.responses_sent == 8
         assert stats.errors_count == 2
 
+    def test_strip_xml_tags_basic(self, chat_bot: ChatBot):
+        """Test basic XML tag stripping functionality."""
+        # Arrange
+        response_with_tags = "<response>Hello world!</response>"
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(response_with_tags)
+
+        # Assert
+        assert cleaned == "Hello world!"
+
+    def test_strip_xml_tags_complex(self, chat_bot: ChatBot):
+        """Test XML tag stripping with complex markup."""
+        # Arrange
+        complex_response = """<response>
+            <greeting>Hello there!</greeting>
+            <message>How can I help you today?</message>
+        </response>"""
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(complex_response)
+
+        # Assert
+        assert "<" not in cleaned
+        assert ">" not in cleaned
+        assert "Hello there!" in cleaned
+        assert "How can I help you today?" in cleaned
+
+    def test_strip_xml_tags_mixed_content(self, chat_bot: ChatBot):
+        """Test XML tag stripping with mixed content and text."""
+        # Arrange
+        mixed_response = "Some text <tag>inside tags</tag> and more text <another>content</another> end."
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(mixed_response)
+
+        # Assert
+        assert cleaned == "Some text inside tags and more text content end."
+
+    def test_strip_xml_tags_self_closing(self, chat_bot: ChatBot):
+        """Test XML tag stripping with self-closing tags."""
+        # Arrange
+        response_with_self_closing = "Hello <br/> world <img src='test'/> test!"
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(response_with_self_closing)
+
+        # Assert
+        assert cleaned == "Hello  world  test!"
+
+    def test_strip_xml_tags_comments_and_cdata(self, chat_bot: ChatBot):
+        """Test XML tag stripping with comments and CDATA sections."""
+        # Arrange
+        response_with_special = """<!-- This is a comment -->
+        Hello world!
+        <![CDATA[Some data here]]>
+        More text."""
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(response_with_special)
+
+        # Assert
+        assert "<!--" not in cleaned
+        assert "-->" not in cleaned
+        assert "CDATA" not in cleaned
+        assert "Hello world!" in cleaned
+        assert "More text." in cleaned
+
+    def test_strip_xml_tags_malformed(self, chat_bot: ChatBot):
+        """Test XML tag stripping with malformed XML."""
+        # Arrange
+        malformed_response = (
+            "Hello < bad tag > world <unclosed tag and </ wrong closing>"
+        )
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(malformed_response)
+
+        # Assert
+        assert "Hello  world" in cleaned
+        assert "<" not in cleaned or ">" not in cleaned
+
+    def test_strip_xml_tags_empty_and_none(self, chat_bot: ChatBot):
+        """Test XML tag stripping with empty and None inputs."""
+        # Test empty string
+        assert chat_bot._strip_xml_tags("") == ""
+
+        # Test None
+        assert chat_bot._strip_xml_tags(None) == ""
+
+        # Test whitespace only
+        assert chat_bot._strip_xml_tags("   ") == ""
+
+    def test_strip_xml_tags_no_tags(self, chat_bot: ChatBot):
+        """Test XML tag stripping with plain text (no tags)."""
+        # Arrange
+        plain_text = "Hello world! This is just plain text with no markup."
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(plain_text)
+
+        # Assert
+        assert cleaned == plain_text
+
+    def test_strip_xml_tags_whitespace_cleanup(self, chat_bot: ChatBot):
+        """Test that extra whitespace is cleaned up after tag removal."""
+        # Arrange
+        response_with_spacing = """<response>
+
+        Hello world!
+
+
+        How are you?
+
+        </response>"""
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(response_with_spacing)
+
+        # Assert - Check that XML tags are removed and whitespace is cleaned up
+        assert "<response>" not in cleaned
+        assert "</response>" not in cleaned
+        assert "Hello world!" in cleaned
+        assert "How are you?" in cleaned
+        # Should not have excessive consecutive newlines (reduced from multiple to single)
+        assert "\n\n\n" not in cleaned
+
+    @pytest.mark.asyncio
+    async def test_process_response_with_tools_strips_xml(
+        self,
+        chat_bot: ChatBot
+    ):
+        """Test that _process_response_with_tools strips XML tags from responses."""
+        # Arrange
+        response_with_xml = "<response>Hello! I'm doing well, thanks for asking.</response>"
+
+        # Act
+        cleaned_response = await chat_bot._process_response_with_tools(response_with_xml, "testuser")
+
+        # Assert
+        assert "<response>" not in cleaned_response
+        assert "</response>" not in cleaned_response
+        assert "Hello! I'm doing well, thanks for asking." in cleaned_response
+
 
 class TestChatBotReconnection:
     """Test cases for ChatBot reconnection functionality (Phase 3)."""
