@@ -662,3 +662,176 @@ class TestXMLPromptTemplateStructuredContext:
         assert xml_output == base_output
         assert "Should be ignored" not in xml_output
         assert "Previous message" in xml_output
+
+
+class TestXMLPromptTemplateStructuredTools:
+    """Test cases for XMLPromptTemplate structured tools (KEP-002 Increment C)."""
+
+    def test_structured_tools_creates_individual_tool_elements(self):
+        """Test that structured tools create individual <tool> elements with metadata."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+        tool_schemas = [
+            {
+                "name": "weather",
+                "description": "Get current weather for a city",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "city": {
+                            "type": "string",
+                            "description": "City name for weather lookup",
+                        }
+                    },
+                    "required": ["city"],
+                },
+            }
+        ]
+
+        # Act
+        result = xml_template.build_prompt(
+            "What's the weather?", tool_schemas=tool_schemas, xml_formatting=True
+        )
+
+        # Assert
+        assert '<tools count="1">' in result
+        assert '<tool name="weather">' in result
+        assert "<description>Get current weather for a city</description>" in result
+        assert "<parameters>" in result
+        assert '<parameter name="city" type="string" required="true">' in result
+        assert "City name for weather lookup" in result
+
+    def test_structured_tools_with_multiple_tools(self):
+        """Test structured tools with multiple tool definitions."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+        tool_schemas = [
+            {
+                "name": "weather",
+                "description": "Get weather info",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            },
+            {
+                "name": "calculator",
+                "description": "Perform calculations",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "expression": {"type": "string"},
+                        "precision": {"type": "number"},
+                    },
+                    "required": ["expression"],
+                },
+            },
+        ]
+
+        # Act
+        result = xml_template.build_prompt(
+            "Help me", tool_schemas=tool_schemas, xml_formatting=True
+        )
+
+        # Assert
+        assert '<tools count="2">' in result
+        assert '<tool name="weather">' in result
+        assert '<tool name="calculator">' in result
+        assert "Get weather info" in result
+        assert "Perform calculations" in result
+
+    def test_structured_tools_includes_usage_examples(self):
+        """Test that structured tools include JSON usage examples."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+        tool_schemas = [
+            {
+                "name": "weather",
+                "description": "Get weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            }
+        ]
+
+        # Act
+        result = xml_template.build_prompt(
+            "Test", tool_schemas=tool_schemas, xml_formatting=True
+        )
+
+        # Assert
+        assert "<usage_example>" in result
+        assert '{"tool": "weather", "params": {"city": "London"}}' in result
+
+    def test_structured_tools_fallback_to_legacy_format(self):
+        """Test that when tools_description is provided, it falls back to legacy format."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+
+        # Act - Use legacy tools_description parameter
+        result = xml_template.build_prompt(
+            "Test", tools_description="Available tools: weather", xml_formatting=True
+        )
+
+        # Assert - Should use legacy format
+        assert '<tools count="1">' in result
+        assert "<description>Available tools: weather</description>" in result
+        assert "<usage_instructions>" in result
+        # Should NOT have structured tool elements
+        assert "<tool name=" not in result
+
+    def test_backward_compatibility_with_xml_formatting_disabled(self):
+        """Test that structured tools are ignored when XML formatting is disabled."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+        tool_schemas = [{"name": "weather", "description": "Get weather"}]
+
+        # Act
+        result = xml_template.build_prompt(
+            "Test", tool_schemas=tool_schemas, xml_formatting=False
+        )
+
+        # Assert - Should use parent class behavior (no tools section at all)
+        assert "<tools>" not in result
+        assert "<tool>" not in result
+
+    def test_empty_tool_schemas_creates_no_tools_section(self):
+        """Test that empty tool schemas don't create a tools section."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+
+        # Act
+        result = xml_template.build_prompt("Test", tool_schemas=[], xml_formatting=True)
+
+        # Assert
+        assert "<tools>" not in result
+
+    def test_structured_tools_xml_is_well_formed(self):
+        """Test that generated structured tools XML is well-formed."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+        tool_schemas = [
+            {
+                "name": "weather",
+                "description": "Get weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            }
+        ]
+
+        # Act
+        result = xml_template.build_prompt(
+            "Test", tool_schemas=tool_schemas, xml_formatting=True
+        )
+
+        # Assert - Should be parseable XML
+        try:
+            ET.fromstring(result)
+        except ET.ParseError as e:
+            pytest.fail(f"Generated XML is not well-formed: {e}")

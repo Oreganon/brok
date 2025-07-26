@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 # Import for KEP-002 Increment B structured context
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 import xml.etree.ElementTree as ET
 
 if TYPE_CHECKING:
@@ -78,15 +79,17 @@ class XMLPromptTemplate(PromptTemplate):
         tools_description: str | None = None,
         xml_formatting: bool = False,
         context_messages: list[ContextMessage] | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
     ) -> str:
         """Build a complete prompt with optional XML formatting.
 
         Args:
             user_input: The user's message
             context: Optional conversation context (legacy string format)
-            tools_description: Optional description of available tools
+            tools_description: Optional description of available tools (legacy format)
             xml_formatting: Whether to use XML structure (KEP-002)
             context_messages: Optional structured context messages (KEP-002 Increment B)
+            tool_schemas: Optional structured tool schemas (KEP-002 Increment C)
 
         Returns:
             str: The complete formatted prompt
@@ -96,7 +99,7 @@ class XMLPromptTemplate(PromptTemplate):
             return super().build_prompt(user_input, context, tools_description)
 
         return self._build_xml_prompt(
-            user_input, context, tools_description, context_messages
+            user_input, context, tools_description, context_messages, tool_schemas
         )
 
     def _build_xml_prompt(
@@ -105,6 +108,7 @@ class XMLPromptTemplate(PromptTemplate):
         context: str | None = None,
         tools_description: str | None = None,
         context_messages: list[ContextMessage] | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
     ) -> str:
         """Build XML-formatted prompt structure.
 
@@ -117,8 +121,9 @@ class XMLPromptTemplate(PromptTemplate):
         Args:
             user_input: The user's message
             context: Optional conversation context (legacy string format)
-            tools_description: Optional description of available tools
+            tools_description: Optional description of available tools (legacy format)
             context_messages: Optional structured context messages (KEP-002 Increment B)
+            tool_schemas: Optional structured tool schemas (KEP-002 Increment C)
 
         Returns:
             str: XML-formatted prompt
@@ -130,8 +135,12 @@ class XMLPromptTemplate(PromptTemplate):
             system_elem = ET.SubElement(root, "system", role="assistant", name="brok")
             system_elem.text = self.system_prompt.strip()
 
-        # Add tools section if provided
-        if tools_description and tools_description.strip():
+        # Add tools section if provided (KEP-002 Increment C)
+        if tool_schemas:
+            # Structured tools with individual <tool> elements (KEP-002 Increment C)
+            self._add_structured_tools(root, tool_schemas)
+        elif tools_description and tools_description.strip():
+            # Legacy tools format for backward compatibility
             tools_elem = ET.SubElement(root, "tools", count="1")
 
             # Add tools description
@@ -241,6 +250,127 @@ class XMLPromptTemplate(PromptTemplate):
 
             # Set message content
             message_elem.text = ctx_msg.content
+
+    def _add_structured_tools(
+        self, root: ET.Element, tool_schemas: list[dict[str, Any]]
+    ) -> None:
+        """Add structured tools section with individual <tool> elements (KEP-002 Increment C).
+
+        Args:
+            root: Root XML element to add tools to
+            tool_schemas: List of tool schema dictionaries
+        """
+        if not tool_schemas:
+            return
+
+        # Create tools container with count
+        tools_elem = ET.SubElement(root, "tools", count=str(len(tool_schemas)))
+
+        # Add each tool as individual element
+        for tool_schema in tool_schemas:
+            self._add_tool_element(tools_elem, tool_schema)
+
+    def _add_tool_element(
+        self, tools_elem: ET.Element, tool_schema: dict[str, Any]
+    ) -> None:
+        """Add a single <tool> element with structured parameters.
+
+        Args:
+            tools_elem: Parent tools element
+            tool_schema: Individual tool schema dictionary
+        """
+        tool_name = tool_schema.get("name", "unknown")
+        tool_desc = tool_schema.get("description", "")
+        parameters = tool_schema.get("parameters", {})
+
+        # Create tool element with name attribute
+        tool_elem = ET.SubElement(tools_elem, "tool", name=tool_name)
+
+        # Add description
+        if tool_desc:
+            desc_elem = ET.SubElement(tool_elem, "description")
+            desc_elem.text = tool_desc
+
+        # Add structured parameters section
+        if parameters and "properties" in parameters:
+            self._add_parameters_section(tool_elem, parameters)
+
+        # Add usage example
+        self._add_usage_example(tool_elem, tool_name, parameters)
+
+    def _add_parameters_section(
+        self, tool_elem: ET.Element, parameters: dict[str, Any]
+    ) -> None:
+        """Add structured parameters section to tool element.
+
+        Args:
+            tool_elem: Parent tool element
+            parameters: Parameters schema dictionary
+        """
+        properties = parameters.get("properties", {})
+        required = parameters.get("required", [])
+
+        if not properties:
+            return
+
+        # Create parameters container
+        params_elem = ET.SubElement(tool_elem, "parameters")
+
+        # Add each parameter with metadata
+        for param_name, param_schema in properties.items():
+            param_type = param_schema.get("type", "string")
+            param_desc = param_schema.get("description", "")
+            is_required = param_name in required
+
+            # Create parameter element with attributes
+            param_elem = ET.SubElement(
+                params_elem,
+                "parameter",
+                name=param_name,
+                type=param_type,
+                required=str(is_required).lower(),
+            )
+
+            # Add parameter description as text content
+            if param_desc:
+                param_elem.text = param_desc
+
+    def _add_usage_example(
+        self, tool_elem: ET.Element, tool_name: str, parameters: dict[str, Any]
+    ) -> None:
+        """Add JSON usage example to tool element.
+
+        Args:
+            tool_elem: Parent tool element
+            tool_name: Name of the tool
+            parameters: Parameters schema dictionary
+        """
+        # Create example usage
+        example_params = {}
+        properties = parameters.get("properties", {})
+
+        # Generate example values for parameters
+        for param_name, param_schema in properties.items():
+            param_type = param_schema.get("type", "string")
+            if param_type == "string":
+                # Use a reasonable example based on parameter name
+                if "city" in param_name.lower():
+                    example_params[param_name] = "London"
+                elif "expression" in param_name.lower():
+                    example_params[param_name] = "2 + 3 * 4"
+                else:
+                    example_params[param_name] = "example_value"
+            elif param_type == "number":
+                example_params[param_name] = 42
+            elif param_type == "boolean":
+                example_params[param_name] = True
+
+        # Create usage example element with JSON
+        usage_elem = ET.SubElement(tool_elem, "usage_example")
+        example_json = json.dumps(
+            {"tool": tool_name, "params": example_params}, separators=(", ", ": ")
+        )
+        usage_elem.text = example_json
 
 
 # Default system prompts for different response styles
