@@ -27,6 +27,9 @@ build-backend = "hatchling.build"
 [tool.hatch.metadata]
 allow-direct-references = true
 
+[tool.hatch.build.targets.wheel]
+packages = ["brok"]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 88

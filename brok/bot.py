@@ -6,10 +6,11 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 import logging
+import sys
 import time
 from typing import TYPE_CHECKING
 
-from brok.exceptions import BrokError, LLMProviderError
+from brok.exceptions import BrokError, LLMProviderError, LLMTimeoutError
 
 if TYPE_CHECKING:
     from brok.chat import ChatClient
@@ -29,13 +30,92 @@ class BotStats:
         errors_count: Total number of errors encountered
         start_time: Bot start timestamp
         last_activity: Timestamp of last message processed
+        
+        # Performance metrics
+        avg_response_time: Average LLM response time in seconds
+        total_response_time: Cumulative response time for averaging
+        max_response_time: Maximum response time observed
+        min_response_time: Minimum response time observed
+        
+        # Resource metrics
+        current_queue_size: Current message queue depth
+        max_queue_size: Maximum queue depth observed
+        
+        # Provider-specific metrics
+        llm_timeouts: Number of LLM timeout errors
+        chat_reconnections: Number of chat reconnection attempts
+        
+        # Message type breakdown
+        command_messages: Messages parsed as commands
+        mention_messages: Messages containing mentions
+        keyword_messages: Messages matching keywords only
     """
 
+    # Core metrics
     messages_processed: int = 0
     responses_sent: int = 0
     errors_count: int = 0
     start_time: float = 0.0
     last_activity: float = 0.0
+    
+    # Performance metrics
+    avg_response_time: float = 0.0
+    total_response_time: float = 0.0
+    max_response_time: float = 0.0
+    min_response_time: float = float('inf')
+    
+    # Resource metrics
+    current_queue_size: int = 0
+    max_queue_size: int = 0
+    
+    # Provider-specific metrics
+    llm_timeouts: int = 0
+    chat_reconnections: int = 0
+    
+    # Message type breakdown
+    command_messages: int = 0
+    mention_messages: int = 0
+    keyword_messages: int = 0
+    
+    def update_response_time(self, response_time: float) -> None:
+        """Update response time statistics.
+        
+        Args:
+            response_time: Response time in seconds
+        """
+        self.total_response_time += response_time
+        self.max_response_time = max(self.max_response_time, response_time)
+        
+        if self.min_response_time == float('inf'):
+            self.min_response_time = response_time
+        else:
+            self.min_response_time = min(self.min_response_time, response_time)
+        
+        # Calculate running average
+        if self.responses_sent > 0:
+            self.avg_response_time = self.total_response_time / self.responses_sent
+    
+    def update_queue_size(self, current_size: int) -> None:
+        """Update queue size statistics.
+        
+        Args:
+            current_size: Current queue depth
+        """
+        self.current_queue_size = current_size
+        self.max_queue_size = max(self.max_queue_size, current_size)
+    
+    def increment_message_type(self, message_type: str) -> None:
+        """Increment counter for specific message type.
+        
+        Args:
+            message_type: Type of message ("command", "mention", "keyword")
+        """
+        if message_type == "command":
+            self.command_messages += 1
+        elif message_type == "mention":
+            self.mention_messages += 1
+        elif message_type == "keyword":
+            self.keyword_messages += 1
 
 
 class ChatBot:
@@ -194,6 +274,7 @@ class ChatBot:
                         # Reset backoff on successful connection
                         reconnect_delay = self._config.initial_reconnect_delay
                         consecutive_failures = 0
+                        self._stats.chat_reconnections += 1
 
                     except Exception as e:
                         consecutive_failures += 1
@@ -244,11 +325,20 @@ class ChatBot:
                     f"Worker {worker_id} processing message from {message.sender}"
                 )
 
-                # Update stats
+                # Update stats with message type tracking
                 self._stats.messages_processed += 1
                 self._stats.last_activity = time.time()
+                
+                # Track message type for analytics
+                message_type = getattr(message, 'message_type', 'keyword')
+                self._stats.increment_message_type(message_type)
+                
+                # Update queue size statistics
+                queue_size = self._chat_client._processing_queue.qsize()
+                self._stats.update_queue_size(queue_size)
 
-                # Generate response using LLM
+                # Generate response using LLM with timing
+                start_time = time.time()
                 try:
                     response_chunks = []
                     async for chunk in self._llm_provider.generate(
@@ -256,27 +346,49 @@ class ChatBot:
                     ):
                         response_chunks.append(chunk)
 
+                    # Calculate response time
+                    response_time = time.time() - start_time
+
                     # Send complete response to chat
                     if response_chunks:
                         full_response = "".join(response_chunks)
                         await self._chat_client.send_message(full_response)
                         self._stats.responses_sent += 1
+                        
+                        # Update response time statistics
+                        self._stats.update_response_time(response_time)
 
-                        # Log metadata if available
+                        # Enhanced logging with performance data
                         metadata = self._llm_provider.get_metadata()
                         if metadata:
                             tokens = metadata.get("tokens_used", 0)
                             logger.info(
-                                f"Response sent (worker {worker_id}, {tokens} tokens)"
+                                f"Response sent (worker {worker_id}, {tokens} tokens, "
+                                f"{response_time:.2f}s, queue: {queue_size})"
+                            )
+                        else:
+                            logger.info(
+                                f"Response sent (worker {worker_id}, {response_time:.2f}s, queue: {queue_size})"
                             )
                     else:
                         logger.warning(
-                            f"LLM generated empty response for message from {message.sender}"
+                            f"LLM generated empty response for message from {message.sender} "
+                            f"(took {response_time:.2f}s)"
                         )
 
+                except LLMTimeoutError:
+                    response_time = time.time() - start_time
+                    logger.warning(
+                        f"LLM timeout processing message from {message.sender} "
+                        f"(after {response_time:.2f}s)"
+                    )
+                    self._stats.llm_timeouts += 1
+                    self._stats.errors_count += 1
                 except LLMProviderError:
+                    response_time = time.time() - start_time
                     logger.exception(
-                        f"LLM error processing message from {message.sender}"
+                        f"LLM error processing message from {message.sender} "
+                        f"(after {response_time:.2f}s)"
                     )
                     self._stats.errors_count += 1
 
@@ -298,20 +410,70 @@ class ChatBot:
         logger.debug(f"LLM worker {worker_id} stopped")
 
     async def _stats_logger(self) -> None:
-        """Log periodic statistics about bot performance."""
+        """Log periodic statistics about bot performance with enhanced metrics."""
         while not self._shutdown_event.is_set():
             await asyncio.sleep(300)  # Log stats every 5 minutes
 
             if self._shutdown_event.is_set():
                 break
 
-            uptime = time.time() - self._stats.start_time
-            logger.info(
-                f"Bot stats - Uptime: {uptime:.0f}s, "
-                f"Messages: {self._stats.messages_processed}, "
-                f"Responses: {self._stats.responses_sent}, "
-                f"Errors: {self._stats.errors_count}"
+            current_time = time.time()
+            uptime = current_time - self._stats.start_time
+            
+            # Calculate rates
+            message_rate = (
+                self._stats.messages_processed / uptime if uptime > 0 else 0
             )
+            response_rate = (
+                self._stats.responses_sent / uptime if uptime > 0 else 0
+            )
+            error_rate = (
+                self._stats.errors_count / self._stats.messages_processed
+                if self._stats.messages_processed > 0 else 0
+            )
+            
+            # Enhanced logging with performance data
+            logger.info(
+                f"📊 Bot Performance Stats - "
+                f"Uptime: {uptime:.0f}s, "
+                f"Messages: {self._stats.messages_processed} ({message_rate:.2f}/s), "
+                f"Responses: {self._stats.responses_sent} ({response_rate:.2f}/s), "
+                f"Errors: {self._stats.errors_count} ({error_rate:.1%})"
+            )
+            
+            # Performance metrics
+            if self._stats.responses_sent > 0:
+                logger.info(
+                    f"⚡ Response Times - "
+                    f"Avg: {self._stats.avg_response_time:.2f}s, "
+                    f"Min: {self._stats.min_response_time:.2f}s, "
+                    f"Max: {self._stats.max_response_time:.2f}s"
+                )
+            
+            # Queue and resource metrics
+            logger.info(
+                f"📋 Resources - "
+                f"Queue: {self._stats.current_queue_size} (max: {self._stats.max_queue_size}), "
+                f"Timeouts: {self._stats.llm_timeouts}, "
+                f"Reconnections: {self._stats.chat_reconnections}"
+            )
+            
+            # Message type breakdown
+            total_typed = (
+                self._stats.command_messages + 
+                self._stats.mention_messages + 
+                self._stats.keyword_messages
+            )
+            if total_typed > 0:
+                logger.info(
+                    f"💬 Message Types - "
+                    f"Commands: {self._stats.command_messages} "
+                    f"({self._stats.command_messages/total_typed:.1%}), "
+                    f"Mentions: {self._stats.mention_messages} "
+                    f"({self._stats.mention_messages/total_typed:.1%}), "
+                    f"Keywords: {self._stats.keyword_messages} "
+                    f"({self._stats.keyword_messages/total_typed:.1%})"
+                )
 
     async def _wait_for_shutdown(self) -> None:
         """Wait for shutdown signal (Ctrl+C)."""
@@ -360,3 +522,112 @@ class ChatBot:
             BotStats: Current runtime statistics
         """
         return self._stats
+
+    async def get_health_status(self) -> dict[str, any]:
+        """Get comprehensive health status for monitoring and debugging.
+        
+        Returns detailed health information including:
+        - Overall status and uptime
+        - Performance statistics
+        - Provider health status
+        - Connection status
+        - Resource utilization metrics
+        
+        Returns:
+            dict: Comprehensive health status information
+        """
+        current_time = time.time()
+        uptime_seconds = current_time - self._stats.start_time if self._stats.start_time > 0 else 0
+        
+        # Calculate additional derived metrics
+        message_rate = (
+            self._stats.messages_processed / uptime_seconds if uptime_seconds > 0 else 0
+        )
+        response_rate = (
+            self._stats.responses_sent / uptime_seconds if uptime_seconds > 0 else 0
+        )
+        error_rate = (
+            self._stats.errors_count / self._stats.messages_processed 
+            if self._stats.messages_processed > 0 else 0
+        )
+        
+        # Determine overall health status
+        is_healthy = (
+            self._chat_client.is_connected() and
+            error_rate < 0.1 and  # Less than 10% error rate
+            (current_time - self._stats.last_activity) < 600  # Active within 10 minutes
+        )
+        
+        # Check provider health (async)
+        try:
+            llm_healthy = await asyncio.wait_for(
+                self._llm_provider.health_check(), timeout=5.0
+            )
+        except Exception:
+            llm_healthy = False
+        
+        return {
+            "status": "healthy" if is_healthy else "unhealthy",
+            "timestamp": current_time,
+            "uptime_seconds": uptime_seconds,
+            "uptime_formatted": f"{uptime_seconds // 3600:.0f}h {(uptime_seconds % 3600) // 60:.0f}m",
+            
+            # Connection status
+            "connections": {
+                "chat_connected": self._chat_client.is_connected(),
+                "llm_healthy": llm_healthy,
+            },
+            
+            # Core statistics
+            "statistics": {
+                "messages_processed": self._stats.messages_processed,
+                "responses_sent": self._stats.responses_sent,
+                "errors_count": self._stats.errors_count,
+                "last_activity": self._stats.last_activity,
+                "time_since_last_activity": current_time - self._stats.last_activity,
+            },
+            
+            # Performance metrics
+            "performance": {
+                "avg_response_time": round(self._stats.avg_response_time, 3),
+                "min_response_time": round(self._stats.min_response_time, 3) if self._stats.min_response_time != float('inf') else None,
+                "max_response_time": round(self._stats.max_response_time, 3),
+                "message_rate_per_second": round(message_rate, 3),
+                "response_rate_per_second": round(response_rate, 3),
+                "error_rate": round(error_rate, 3),
+            },
+            
+            # Resource metrics
+            "resources": {
+                "current_queue_size": self._stats.current_queue_size,
+                "max_queue_size": self._stats.max_queue_size,
+            },
+            
+            # Provider-specific metrics
+            "providers": {
+                "llm_timeouts": self._stats.llm_timeouts,
+                "chat_reconnections": self._stats.chat_reconnections,
+            },
+            
+            # Message type breakdown
+            "message_types": {
+                "commands": self._stats.command_messages,
+                "mentions": self._stats.mention_messages,
+                "keywords": self._stats.keyword_messages,
+            },
+            
+            # Configuration info
+            "config": {
+                "llm_provider": self._config.llm_provider,
+                "llm_model": self._config.llm_model,
+                "chat_environment": self._config.chat_environment,
+                "max_concurrent_requests": self._config.llm_max_concurrent_requests,
+                "context_window_size": self._config.context_window_size,
+            },
+            
+            # Version info
+            "version": {
+                "brok": getattr(self, '__version__', '0.1.0'),
+                "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            }
+        }
