@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
+import sys
 
 from brok import __version__
 from brok.bot import ChatBot
@@ -13,6 +13,7 @@ from brok.chat import ChatClient, create_default_filters
 from brok.config import BotConfig
 from brok.exceptions import ConfigurationError
 from brok.llm.base import LLMConfig
+from brok.llm.llamacpp import LlamaCppProvider
 from brok.llm.ollama import OllamaProvider
 
 
@@ -28,11 +29,18 @@ Examples:
   python main.py --jwt TOKEN        # Start bot with authentication
   python main.py --dev --jwt TOKEN  # Start bot in dev with auth
 
+  # Using different LLM providers:
+  LLM_PROVIDER=ollama python main.py               # Use Ollama (default)
+  LLM_PROVIDER=llamacpp python main.py             # Use LlamaCpp HTTP server
+  python main.py --llm-provider llamacpp           # Use LlamaCpp via CLI flag
+  python main.py --llm-url http://localhost:8080   # Override LLM API URL
+  python main.py --llm-provider llamacpp --llm-url http://localhost:8080  # Combined
+
 Environment Variables:
   STRIMS_JWT          JWT token for authentication
-  LLM_PROVIDER        LLM provider (default: ollama)
+  LLM_PROVIDER        LLM provider: ollama, llamacpp (default: ollama)
   LLM_MODEL           Model name (default: llama3.2:3b)
-  LLM_BASE_URL        LLM API URL (default: http://localhost:11434)
+  LLM_BASE_URL        LLM API URL (default: http://localhost:11434 for ollama, http://localhost:8080 for llamacpp)
   BOT_KEYWORDS        Trigger keywords (default: !bot,!ask)
   LOG_LEVEL           Logging level (default: INFO)
         """,
@@ -48,6 +56,19 @@ Environment Variables:
         "--jwt",
         type=str,
         help="JWT token for authentication (overrides STRIMS_JWT environment variable)",
+    )
+
+    parser.add_argument(
+        "--llm-url",
+        type=str,
+        help="LLM API base URL (overrides LLM_BASE_URL environment variable)",
+    )
+
+    parser.add_argument(
+        "--llm-provider",
+        type=str,
+        choices=["ollama", "llamacpp"],
+        help="LLM provider to use (overrides LLM_PROVIDER environment variable)",
     )
 
     return parser.parse_args()
@@ -66,6 +87,10 @@ async def main() -> None:
             config.chat_environment = "dev"
         if args.jwt:
             config.jwt_token = args.jwt
+        if args.llm_url:
+            config.llm_base_url = args.llm_url
+        if args.llm_provider:
+            config.llm_provider = args.llm_provider
 
         # Set up logging
         setup_logging(config.log_level, config.log_chat_messages)
@@ -85,20 +110,29 @@ async def main() -> None:
         )
 
         # Create LLM provider
+        llm_config = LLMConfig(
+            model_name=config.llm_model,
+            max_tokens=config.llm_max_tokens,
+            temperature=config.llm_temperature,
+            timeout_seconds=config.llm_timeout_seconds,
+        )
+
         if config.llm_provider == "ollama":
-            llm_config = LLMConfig(
-                model_name=config.llm_model,
-                max_tokens=config.llm_max_tokens,
-                temperature=config.llm_temperature,
-                timeout_seconds=config.llm_timeout_seconds,
-            )
             llm_provider = OllamaProvider(
                 base_url=config.llm_base_url,
                 model=config.llm_model,
                 config=llm_config,
             )
+        elif config.llm_provider == "llamacpp":
+            llm_provider = LlamaCppProvider(
+                base_url=config.llm_base_url,
+                model=config.llm_model,
+                config=llm_config,
+            )
         else:
-            raise ConfigurationError(f"Unsupported LLM provider: {config.llm_provider}")
+            raise ConfigurationError(
+                f"Unsupported LLM provider: {config.llm_provider}. Supported providers: ollama, llamacpp"
+            )
 
         # Create and start the bot
         bot = ChatBot(
@@ -126,8 +160,6 @@ def setup_logging(level: str, log_chat_messages: bool) -> None:
         level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_chat_messages: Whether to log chat messages
     """
-    import sys
-
     # Configure root logger
     logging.basicConfig(
         level=getattr(logging, level.upper()),
