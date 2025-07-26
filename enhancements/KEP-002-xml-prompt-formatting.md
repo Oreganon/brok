@@ -4,7 +4,7 @@
 
 This enhancement proposal introduces XML-based prompt formatting to improve how context, tools, and instructions are structured for LLM consumption. The current system uses simple text concatenation with `\n\n` separators, creating ambiguous boundaries between prompt sections. XML markup provides clearer semantic separation while maintaining backward compatibility and improving LLM comprehension.
 
-**Status**: Draft - Planning Phase
+**Status**: In Progress - Increment A Complete
 
 ## Motivation
 
@@ -38,17 +38,25 @@ This enhancement proposal introduces XML-based prompt formatting to improve how 
 
 ## Proposal
 
-### Increment A: XML Foundation
+### Increment A: XML Foundation ✅ **COMPLETED**
 
 **Objective**: Add optional XML formatting with feature flag
 
 **Goals:**
-- [ ] Implement `XMLPromptTemplate` extending `PromptTemplate`
-- [ ] Add `XML_PROMPT_FORMATTING` feature flag (default: false)
-- [ ] Ensure identical output when flag disabled (round-trip test equality)
-- [ ] Basic XML sections: `<system>`, `<tools>`, `<context>`, `<request>`
+- [x] Implement `XMLPromptTemplate` extending `PromptTemplate`
+- [x] Add `XML_PROMPT_FORMATTING` feature flag (default: false)
+- [x] Ensure identical output when flag disabled (round-trip test equality)
+- [x] Basic XML sections: `<system>`, `<tools>`, `<context>`, `<request>`
 
-**Success Criteria**: XML available as opt-in with zero behavior change when disabled
+**Success Criteria**: ✅ XML available as opt-in with zero behavior change when disabled
+
+**Implementation Notes (Commit 08605ee8):**
+- Added `xml_prompt_formatting: bool = False` to `BotConfig` class
+- Implemented `XMLPromptTemplate` with full inheritance from `PromptTemplate`
+- Environment variable parsing: `XML_PROMPT_FORMATTING=true` enables feature
+- Comprehensive test suite: 29 new tests ensuring backward compatibility
+- Round-trip equality validated: identical output when `xml_formatting=False`
+- XML structure includes semantic sections with proper attributes and pretty-printing
 
 ### Increment B: Enhanced Context Structure  
 
@@ -217,8 +225,8 @@ XML_PROMPT_FORMATTING=false  # Main toggle - only this exposed initially
 
 ## Graduation Criteria
 
-**Alpha (A)**: XML foundation with feature flag, zero impact when disabled
-**Beta (B-C)**: Context and tool integration, measurable improvements  
+**Alpha (A)**: ✅ **COMPLETED** - XML foundation with feature flag, zero impact when disabled
+**Beta (B-C)**: **NEXT** - Context and tool integration, measurable improvements  
 **Stable (D)**: Performance optimized, production monitoring operational
 **Production**: Feature enabled by default based on positive metrics
 
