@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import aiohttp
 
 from brok.exceptions import LLMConnectionError, LLMGenerationError, LLMTimeoutError
 from brok.llm.base import LLMConfig, LLMMetadata, LLMProvider
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +56,7 @@ class OllamaProvider(LLMProvider):
 
     async def generate(
         self, prompt: str, context: str | None = None
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str]:
         """Generate response from Ollama API.
 
         Creates a simple prompt with optional context and streams the response.
@@ -128,7 +131,7 @@ class OllamaProvider(LLMProvider):
         except aiohttp.ServerTimeoutError as e:
             raise LLMTimeoutError(f"Ollama request timed out: {e}") from e
         except Exception as e:
-            if isinstance(e, (LLMConnectionError, LLMTimeoutError, LLMGenerationError)):
+            if isinstance(e, LLMConnectionError | LLMTimeoutError | LLMGenerationError):
                 raise
             raise LLMGenerationError(f"Unexpected error during generation: {e}") from e
 

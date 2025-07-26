@@ -151,3 +151,6 @@ safety-report.json
 # Temporary files
 *.tmp
 *.temp
+
+.serena/
+IMPLEMENTATION_PLAN.md
