@@ -3,16 +3,131 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable
+import logging
+from typing import TYPE_CHECKING
 
 from wsggpy import AsyncSession, ChatEnvironment, Message, RoomAction
 
 from brok.exceptions import ChatAuthenticationError, ChatConnectionError
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 logger = logging.getLogger(__name__)
+
+
+def is_mention(message: str, bot_name: str) -> bool:
+    """Check if message mentions the bot.
+
+    Detects various mention patterns:
+    - @botname
+    - botname:
+    - botname,
+    - botname (at start of message)
+
+    Args:
+        message: The chat message text
+        bot_name: The bot's name to check for mentions
+
+    Returns:
+        bool: True if the message mentions the bot
+    """
+    if not message.strip():
+        return False
+
+    # Normalize both message and bot name for comparison
+    message_lower = message.lower().strip()
+    bot_name_lower = bot_name.lower()
+
+    # Pattern 1: @botname (anywhere in message)
+    if f"@{bot_name_lower}" in message_lower:
+        return True
+
+    # Pattern 2: botname: (at start of message)
+    if message_lower.startswith(f"{bot_name_lower}:"):
+        return True
+
+    # Pattern 3: botname, (at start of message)
+    if message_lower.startswith(f"{bot_name_lower},"):
+        return True
+
+    # Pattern 4: botname (as first word)
+    words = message_lower.split()
+    return bool(words and words[0] == bot_name_lower)
+
+
+def parse_command(message: str, bot_name: str) -> ParsedCommand | None:  # noqa: PLR0911
+    """Parse a command from a chat message.
+
+    Supports various command formats:
+    - !command args
+    - @botname command args
+    - botname: command args
+    - botname, command args
+    - botname command args
+
+    Args:
+        message: The chat message text
+        bot_name: The bot's name
+
+    Returns:
+        ParsedCommand | None: Parsed command or None if not a command
+    """
+    if not message.strip():
+        return None
+
+    message = message.strip()
+    message_lower = message.lower()
+    bot_name_lower = bot_name.lower()
+
+    # Pattern 1: !command args
+    if message.startswith("!"):
+        parts = message[1:].split()
+        if parts:
+            return ParsedCommand(
+                command=parts[0].lower(), args=parts[1:], full_text=message
+            )
+
+    # Pattern 2: @botname command args
+    at_mention_pattern = f"@{bot_name_lower}"
+    if message_lower.startswith(at_mention_pattern):
+        remaining = message[len(at_mention_pattern) :].strip()
+        parts = remaining.split()
+        if parts:
+            return ParsedCommand(
+                command=parts[0].lower(), args=parts[1:], full_text=message
+            )
+
+    # Pattern 3: botname: command args
+    colon_pattern = f"{bot_name_lower}:"
+    if message_lower.startswith(colon_pattern):
+        remaining = message[len(colon_pattern) :].strip()
+        parts = remaining.split()
+        if parts:
+            return ParsedCommand(
+                command=parts[0].lower(), args=parts[1:], full_text=message
+            )
+
+    # Pattern 4: botname, command args
+    comma_pattern = f"{bot_name_lower},"
+    if message_lower.startswith(comma_pattern):
+        remaining = message[len(comma_pattern) :].strip()
+        parts = remaining.split()
+        if parts:
+            return ParsedCommand(
+                command=parts[0].lower(), args=parts[1:], full_text=message
+            )
+
+    # Pattern 5: botname command args (botname as first word)
+    words = message.split()
+    if words and words[0].lower() == bot_name_lower and len(words) > 1:
+        return ParsedCommand(
+            command=words[1].lower(), args=words[2:], full_text=message
+        )
+
+    return None
 
 
 @dataclass
@@ -24,12 +139,33 @@ class ProcessedMessage:
         sender: Username of the message sender
         timestamp: Unix timestamp when message was received
         context: Optional conversation context (recent chat history)
+        message_type: Type of message (keyword, mention, command)
+        command: Parsed command name if message_type is "command"
+        command_args: Parsed command arguments if message_type is "command"
     """
 
     original_message: str
     sender: str
     timestamp: float
     context: str | None = None
+    message_type: str = "keyword"  # "keyword", "mention", "command"
+    command: str | None = None
+    command_args: list[str] | None = None
+
+
+@dataclass
+class ParsedCommand:
+    """Represents a parsed command from a chat message.
+
+    Attributes:
+        command: The command name (e.g., "help", "status")
+        args: List of command arguments
+        full_text: The original command text
+    """
+
+    command: str
+    args: list[str]
+    full_text: str
 
 
 class ChatClient:
@@ -51,15 +187,24 @@ class ChatClient:
         self,
         response_filters: list[Callable[[str, str], bool]],
         context_window_size: int = 10,
+        bot_name: str = "brok",
+        respond_to_mentions: bool = True,
+        respond_to_commands: bool = True,
     ):
         """Initialize chat client.
 
         Args:
             response_filters: List of functions to determine if bot should respond
             context_window_size: Number of recent messages to keep for context
+            bot_name: Bot name for mention detection
+            respond_to_mentions: Whether to respond to mentions
+            respond_to_commands: Whether to parse and respond to commands
         """
         self._filters = response_filters
         self._context_window_size = context_window_size
+        self._bot_name = bot_name
+        self._respond_to_mentions = respond_to_mentions
+        self._respond_to_commands = respond_to_commands
         self._context_messages: list[str] = []
         self._processing_queue: asyncio.Queue[ProcessedMessage] = asyncio.Queue()
         self._session: AsyncSession | None = None
@@ -105,7 +250,7 @@ class ChatClient:
             logger.info(f"✅ Connected to {environment} chat ({auth_status})")
 
         except Exception as e:
-            logger.error(f"Failed to connect to chat: {e}")
+            logger.exception("Failed to connect to chat")
             if "authentication" in str(e).lower() or "unauthorized" in str(e).lower():
                 raise ChatAuthenticationError(f"Chat authentication failed: {e}") from e
             raise ChatConnectionError(f"Failed to connect to chat: {e}") from e
@@ -126,34 +271,54 @@ class ChatClient:
         """Check if client is connected to chat."""
         return self._is_connected and self._session is not None
 
-    async def should_respond_to_message(self, message: str, sender: str) -> bool:
+    async def should_respond_to_message(
+        self, message: str, sender: str
+    ) -> tuple[bool, str, ParsedCommand | None]:
         """Determine if bot should respond to this message.
 
-        Applies all configured filters to determine if the message should
-        trigger a bot response.
+        Checks for keywords, mentions, and commands based on configuration.
 
         Args:
             message: The chat message text
             sender: Username of the sender
 
         Returns:
-            bool: True if bot should respond to this message
+            tuple: (should_respond, message_type, parsed_command)
+                - should_respond: True if bot should respond
+                - message_type: "keyword", "mention", or "command"
+                - parsed_command: ParsedCommand if it's a command, None otherwise
         """
         # Skip empty messages
         if not message.strip():
-            return False
+            return False, "keyword", None
 
-        # Apply all filters - if any return True, we should respond
+        # Check for commands first (highest priority)
+        if self._respond_to_commands:
+            parsed_command = parse_command(message, self._bot_name)
+            if parsed_command:
+                logger.debug(
+                    f"Message '{message}' from {sender} is command: {parsed_command.command}"
+                )
+                return True, "command", parsed_command
+
+        # Check for mentions
+        if self._respond_to_mentions and is_mention(message, self._bot_name):
+            logger.debug(f"Message '{message}' from {sender} mentions bot")
+            return True, "mention", None
+
+        # Apply keyword filters (original behavior)
         for filter_func in self._filters:
             try:
                 if filter_func(message, sender):
-                    logger.debug(f"Message '{message}' from {sender} matched filter")
-                    return True
+                    logger.debug(
+                        f"Message '{message}' from {sender} matched keyword filter"
+                    )
+                    return True, "keyword", None
             except Exception as e:
                 logger.warning(f"Filter function error: {e}")
                 continue
 
-        return False
+        return False, "keyword", None
 
     async def add_message_to_context(self, message: str, sender: str) -> None:
         """Add message to rolling context window.
@@ -210,7 +375,7 @@ class ChatClient:
             logger.info(f"Sent message: {message[:100]}...")  # Log first 100 chars
 
         except Exception as e:
-            logger.error(f"Failed to send message: {e}")
+            logger.exception("Failed to send message")
             raise ChatConnectionError(f"Failed to send message: {e}") from e
 
     async def get_next_message(self) -> ProcessedMessage:
@@ -223,7 +388,7 @@ class ChatClient:
         """
         return await self._processing_queue.get()
 
-    def _on_message(self, message: Message, session: AsyncSession) -> None:
+    def _on_message(self, message: Message, _session: AsyncSession) -> None:
         """Handle incoming chat message.
 
         Called by wsggpy when a new message is received. Processes the message
@@ -236,7 +401,7 @@ class ChatClient:
         try:
             sender = message.sender.nick
             content = message.message
-            
+
             # Handle timestamp conversion - could be datetime or numeric
             if isinstance(message.timestamp, datetime):
                 # Convert datetime to Unix timestamp in seconds
@@ -248,27 +413,31 @@ class ChatClient:
             logger.debug(f"Received message from {sender}: {content}")
 
             # Add to context (non-blocking)
-            asyncio.create_task(self.add_message_to_context(content, sender))
+            _context_task = asyncio.create_task(  # noqa: RUF006
+                self.add_message_to_context(content, sender)
+            )
 
             # Check if we should respond (non-blocking check)
-            should_respond = asyncio.create_task(
+            should_respond_task = asyncio.create_task(
                 self.should_respond_to_message(content, sender)
             )
 
             # Queue for processing if filters match
-            asyncio.create_task(
-                self._maybe_queue_message(content, sender, timestamp, should_respond)
+            _queue_task = asyncio.create_task(  # noqa: RUF006
+                self._maybe_queue_message(
+                    content, sender, timestamp, should_respond_task
+                )
             )
 
-        except Exception as e:
-            logger.error(f"Error processing message: {e}")
+        except Exception:
+            logger.exception("Error processing message")
 
     async def _maybe_queue_message(
         self,
         content: str,
         sender: str,
         timestamp: float,
-        should_respond_task: asyncio.Task[bool],
+        should_respond_task: asyncio.Task[tuple[bool, str, ParsedCommand | None]],
     ) -> None:
         """Queue message for LLM processing if filters match.
 
@@ -279,24 +448,40 @@ class ChatClient:
             should_respond_task: Task that determines if we should respond
         """
         try:
-            should_respond = await should_respond_task
+            should_respond, message_type, parsed_command = await should_respond_task
             if should_respond:
                 context = self.get_context()
+
+                # Create processed message with new fields
                 processed_msg = ProcessedMessage(
                     original_message=content,
                     sender=sender,
                     timestamp=timestamp,
                     context=context,
+                    message_type=message_type,
+                    command=parsed_command.command if parsed_command else None,
+                    command_args=parsed_command.args if parsed_command else None,
                 )
 
                 # Queue for LLM processing
                 await self._processing_queue.put(processed_msg)
-                logger.info(f"Queued message from {sender} for LLM processing")
 
-        except Exception as e:
-            logger.error(f"Error queueing message: {e}")
+                # Enhanced logging
+                if message_type == "command":
+                    logger.info(
+                        f"Queued command '{parsed_command.command}' from {sender} for LLM processing"
+                    )
+                elif message_type == "mention":
+                    logger.info(f"Queued mention from {sender} for LLM processing")
+                else:
+                    logger.info(
+                        f"Queued keyword message from {sender} for LLM processing"
+                    )
 
-    def _on_join(self, event: RoomAction, session: AsyncSession) -> None:
+        except Exception:
+            logger.exception("Error queueing message")
+
+    def _on_join(self, event: RoomAction, _session: AsyncSession) -> None:
         """Handle user join event.
 
         Args:
@@ -306,7 +491,7 @@ class ChatClient:
         username = event.user.nick
         logger.debug(f"👋 {username} joined the chat")
 
-    def _on_quit(self, event: RoomAction, session: AsyncSession) -> None:
+    def _on_quit(self, event: RoomAction, _session: AsyncSession) -> None:
         """Handle user quit event.
 
         Args:
@@ -332,9 +517,35 @@ def create_default_filters(keywords: list[str]) -> list[Callable[[str, str], boo
         >>> assert filters[0]("hello", "user123") is False
     """
 
-    def keyword_filter(message: str, sender: str) -> bool:
+    def keyword_filter(message: str, _sender: str) -> bool:
         """Filter based on message starting with specific keywords."""
         message_lower = message.lower().strip()
         return any(message_lower.startswith(keyword.lower()) for keyword in keywords)
 
     return [keyword_filter]
+
+
+def create_enhanced_filters(
+    keywords: list[str],
+    _bot_name: str,
+    _respond_to_mentions: bool = True,
+    _respond_to_commands: bool = True,
+) -> list[Callable[[str, str], bool]]:
+    """Create enhanced message filters with mention and command support.
+
+    Note: This function is kept for compatibility, but the new ChatClient
+    handles mentions and commands directly in should_respond_to_message().
+    This function only creates keyword filters.
+
+    Args:
+        keywords: List of keywords that should trigger bot responses
+        bot_name: Bot name for mention detection (unused in this implementation)
+        respond_to_mentions: Whether to respond to mentions (unused in this implementation)
+        respond_to_commands: Whether to respond to commands (unused in this implementation)
+
+    Returns:
+        list[Callable]: List of filter functions
+    """
+    # For backward compatibility, just return keyword filters
+    # Mentions and commands are handled in ChatClient.should_respond_to_message()
+    return create_default_filters(keywords)

@@ -37,12 +37,15 @@ Examples:
   python main.py --llm-provider llamacpp --llm-url http://localhost:8080  # Combined
 
 Environment Variables:
-  STRIMS_JWT          JWT token for authentication
-  LLM_PROVIDER        LLM provider: ollama, llamacpp (default: ollama)
-  LLM_MODEL           Model name (default: llama3.2:3b)
-  LLM_BASE_URL        LLM API URL (default: http://localhost:11434 for ollama, http://localhost:8080 for llamacpp)
-  BOT_KEYWORDS        Trigger keywords (default: !bot,!ask)
-  LOG_LEVEL           Logging level (default: INFO)
+  STRIMS_JWT                 JWT token for authentication
+  LLM_PROVIDER               LLM provider: ollama, llamacpp (default: ollama)
+  LLM_MODEL                  Model name (default: llama3.2:3b)
+  LLM_BASE_URL               LLM API URL (default: http://localhost:11434 for ollama, http://localhost:8080 for llamacpp)
+  BOT_NAME                   Bot name for mentions (default: brok)
+  BOT_KEYWORDS               Trigger keywords (default: !bot,!ask)
+  BOT_RESPOND_TO_MENTIONS    Respond to mentions (default: true)
+  BOT_RESPOND_TO_COMMANDS    Parse and respond to commands (default: true)
+  LOG_LEVEL                  Logging level (default: INFO)
         """,
     )
 
@@ -107,6 +110,9 @@ async def main() -> None:
         chat_client = ChatClient(
             response_filters=filters,
             context_window_size=config.context_window_size,
+            bot_name=config.bot_name,
+            respond_to_mentions=config.respond_to_mentions,
+            respond_to_commands=config.respond_to_commands,
         )
 
         # Create LLM provider
