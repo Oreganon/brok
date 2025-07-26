@@ -194,8 +194,8 @@ class ToolParser:
             pattern = r"\\[TOOL:([^\\]]+)\\]([^\\[]*?)\\[/TOOL\\]"
             matches = re.findall(pattern, response, re.IGNORECASE)
 
-            for explicit_tool_name, params_str in matches:
-                explicit_tool_name = explicit_tool_name.strip().lower()
+            for tool_name_raw, params_str in matches:
+                explicit_tool_name = tool_name_raw.strip().lower()
 
                 if (
                     not self.available_tools
