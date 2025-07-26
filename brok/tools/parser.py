@@ -191,7 +191,7 @@ class ToolParser:
         Expected format: [TOOL:name] param1=value1 param2=value2 [/TOOL]
         """
         try:
-            pattern = r"\\[TOOL:([^\\]]+)\\]([^\\[]*?)\\[/TOOL\\]"
+            pattern = r"\[TOOL:([^\]]+)\]([^\[]*?)\[/TOOL\]"
             matches = re.findall(pattern, response, re.IGNORECASE)
 
             for tool_name_raw, params_str in matches:
@@ -309,7 +309,7 @@ class ToolParser:
         params: dict[str, Any] = {}
 
         # Pattern to match key=value pairs, handling quoted values
-        pattern = r'(\\w+)=(?:"([^"]*)"|([^\\s]+))'
+        pattern = r'(\w+)=(?:"([^"]*)"|([^\s]+))'
         matches = re.findall(pattern, params_str)
 
         for key, quoted_value, unquoted_value in matches:
