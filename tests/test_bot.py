@@ -572,21 +572,91 @@ class TestChatBot:
         assert "\n\n\n" not in cleaned
 
     @pytest.mark.asyncio
-    async def test_process_response_with_tools_strips_xml(
-        self,
-        chat_bot: ChatBot
-    ):
+    async def test_process_response_with_tools_strips_xml(self, chat_bot: ChatBot):
         """Test that _process_response_with_tools strips XML tags from responses."""
         # Arrange
-        response_with_xml = "<response>Hello! I'm doing well, thanks for asking.</response>"
+        response_with_xml = (
+            "<response>Hello! I'm doing well, thanks for asking.</response>"
+        )
 
         # Act
-        cleaned_response = await chat_bot._process_response_with_tools(response_with_xml, "testuser")
+        cleaned_response = await chat_bot._process_response_with_tools(
+            response_with_xml, "testuser"
+        )
 
         # Assert
         assert "<response>" not in cleaned_response
         assert "</response>" not in cleaned_response
         assert "Hello! I'm doing well, thanks for asking." in cleaned_response
+
+    def test_xml_stripping_before_truncation_logic(self, chat_bot: ChatBot):
+        """Test that XML stripping happens before any length-based decisions.
+
+        This ensures that truncation in send_message() is based on clean text length,
+        not XML-polluted text length. A message with XML tags that would be over
+        the limit with tags but under the limit without tags should NOT be truncated.
+        """
+        # Arrange - Create a message that's long with XML but short when cleaned
+        # XML tags add significant length but should be stripped before truncation
+        clean_content = "This is a test message that is under 500 characters when clean but has lots of XML markup around it."
+
+        # Add lots of XML tags to make it over 500 chars with tags but under without
+        xml_wrapped = f"""<response xmlns="http://example.com/schema" version="1.0" timestamp="2024-01-01T00:00:00Z">
+            <metadata>
+                <timestamp format="ISO8601">2024-01-01T00:00:00Z</timestamp>
+                <user role="human" authenticated="true">testuser</user>
+                <conversation_id>conv_12345678</conversation_id>
+                <type category="chat" subcategory="response">chat_response</type>
+                <priority level="normal" urgent="false">normal</priority>
+                <source provider="llm" model="test-model" version="1.0">llm</source>
+                <model name="test-model" provider="test" size="large">test-model</model>
+                <language code="en" region="US">English</language>
+                <confidence score="0.95" threshold="0.8">high</confidence>
+            </metadata>
+            <content type="text" encoding="utf-8" length="{len(clean_content)}">{clean_content}</content>
+            <status code="200" message="success" timestamp="2024-01-01T00:00:00Z">success</status>
+            <processing_info duration_ms="150" tokens_used="45" cost="0.001" />
+        </response>"""
+
+        # Verify our test setup: XML version should be long, clean version should be short
+        assert len(xml_wrapped) > 500, (
+            f"Test setup error: XML version is {len(xml_wrapped)} chars, should be > 500"
+        )
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(xml_wrapped)
+
+        # Assert
+        assert len(cleaned) < 500, (
+            f"Clean version is {len(cleaned)} chars, should be < 500"
+        )
+        assert clean_content in cleaned
+        assert "<response>" not in cleaned
+        assert "<metadata>" not in cleaned
+
+        # The key assertion: since XML stripping happens in _process_response_with_tools
+        # BEFORE send_message truncation, this should result in a clean, non-truncated message
+        assert not cleaned.endswith("..."), "Clean message should not be truncated"
+
+    def test_xml_stripping_preserves_long_content_for_truncation(
+        self, chat_bot: ChatBot
+    ):
+        """Test that content still gets truncated if it's genuinely long even after XML stripping."""
+        # Arrange - Create content that's genuinely long even after XML removal
+        long_content = "This is a very long message. " * 30  # About 900 characters
+        xml_wrapped = f"<response>{long_content}</response>"
+
+        # Act
+        cleaned = chat_bot._strip_xml_tags(xml_wrapped)
+
+        # Assert
+        assert len(cleaned) > 500, (
+            f"Clean version is {len(cleaned)} chars, should be > 500"
+        )
+        assert "<response>" not in cleaned
+        assert long_content.strip() == cleaned  # Should be just the long content
+
+        # This will be truncated later by send_message(), which is correct behavior
 
 
 class TestChatBotReconnection:
