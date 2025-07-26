@@ -142,6 +142,7 @@ class ProcessedMessage:
         sender: Username of the message sender
         timestamp: Unix timestamp when message was received
         context: Optional conversation context (recent chat history)
+        context_messages: Optional structured context messages (KEP-002 Increment B)
         message_type: Type of message (keyword, mention, command)
         command: Parsed command name if message_type is "command"
         command_args: Parsed command arguments if message_type is "command"
@@ -151,6 +152,7 @@ class ProcessedMessage:
     sender: str
     timestamp: float
     context: str | None = None
+    context_messages: list[ContextMessage] | None = None
     message_type: str = "keyword"  # "keyword", "mention", "command"
     command: str | None = None
     command_args: list[str] | None = None
@@ -487,6 +489,47 @@ class ChatClient:
                 return None
 
             return "\n".join(self._context_messages_legacy)
+
+    def get_structured_context(self, current_sender: str | None = None) -> list[ContextMessage] | None:
+        """Get structured context messages for XMLPromptTemplate (KEP-002 Increment B).
+
+        Returns the processed context messages with mention-aware prioritization
+        and token limiting, ready for use with XMLPromptTemplate structured context.
+
+        Args:
+            current_sender: Username of current message sender for prioritization
+
+        Returns:
+            list[ContextMessage] | None: Structured context messages or None if enhanced context disabled
+        """
+        if not self._enhanced_context:
+            return None
+
+        if not self._context_messages_structured:
+            return None
+
+        # Filter messages efficiently using list comprehension
+        if self._include_bot_responses:
+            filtered_messages = list(self._context_messages_structured)
+        else:
+            filtered_messages = [
+                msg for msg in self._context_messages_structured if not msg.is_bot
+            ]
+
+        if not filtered_messages:
+            return None
+
+        # Apply mention-aware prioritization if enabled
+        if self._prioritize_mentions and current_sender:
+            prioritized_messages = self._prioritize_context_messages(
+                filtered_messages, current_sender
+            )
+        else:
+            # Use reversed view for efficiency instead of list creation
+            prioritized_messages = list(reversed(filtered_messages))
+
+        # Apply token-based context limiting
+        return self._apply_token_limit(prioritized_messages)
 
     def _prioritize_context_messages(
         self, messages: list[ContextMessage], current_sender: str
@@ -1015,13 +1058,15 @@ class ChatClient:
             should_respond, message_type, parsed_command = await should_respond_task
             if should_respond:
                 context = self.get_context(current_sender=sender)
+                context_messages = self.get_structured_context(current_sender=sender)
 
-                # Create processed message with new fields
+                # Create processed message with new fields (KEP-002 Increment B)
                 processed_msg = ProcessedMessage(
                     original_message=content,
                     sender=sender,
                     timestamp=timestamp,
                     context=context,
+                    context_messages=context_messages,
                     message_type=message_type,
                     command=parsed_command.command if parsed_command else None,
                     command_args=parsed_command.args if parsed_command else None,

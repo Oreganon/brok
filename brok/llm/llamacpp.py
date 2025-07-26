@@ -10,7 +10,7 @@ import aiohttp
 
 from brok.exceptions import LLMConnectionError, LLMGenerationError, LLMTimeoutError
 from brok.llm.base import LLMConfig, LLMMetadata, LLMProvider
-from brok.prompts import PromptTemplate, get_prompt_template
+from brok.prompts import PromptTemplate, get_prompt_template, XMLPromptTemplate
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -64,7 +64,7 @@ class LlamaCppProvider(LLMProvider):
         self._last_metadata: LLMMetadata = {}
 
     async def generate(  # type: ignore[override]
-        self, prompt: str, context: str | None = None
+        self, prompt: str, context: str | None = None, context_messages: list | None = None
     ) -> AsyncGenerator[str]:
         """Generate response from LlamaCpp HTTP server.
 
@@ -97,8 +97,8 @@ class LlamaCppProvider(LLMProvider):
                         timeout=aiohttp.ClientTimeout(total=self.config.timeout_seconds)
                     )
 
-        # Build the full prompt with context
-        full_prompt = self._build_prompt(prompt, context)
+        # Build the full prompt with context (KEP-002 Increment B)
+        full_prompt = self._build_prompt(prompt, context, context_messages)
 
         # Prepare request payload for llama.cpp completion endpoint
         payload = {
@@ -206,18 +206,31 @@ class LlamaCppProvider(LLMProvider):
         """
         return self._last_metadata.copy()
 
-    def _build_prompt(self, prompt: str, context: str | None) -> str:
+    def _build_prompt(self, prompt: str, context: str | None, context_messages: list | None = None) -> str:
         """Build the full prompt with optional context and tools using the configured template.
 
         Args:
             prompt: The user's input message
-            context: Optional conversation context
+            context: Optional conversation context (legacy string format)
+            context_messages: Optional structured context messages (KEP-002 Increment B)
 
         Returns:
             str: The complete prompt to send to LlamaCpp
         """
         tools_description = self.get_tools_description() if self.has_tools() else None
-        return self.prompt_template.build_prompt(prompt, context, tools_description)
+        
+        # Use structured context with XMLPromptTemplate (KEP-002 Increment B)
+        if isinstance(self.prompt_template, XMLPromptTemplate) and context_messages:
+            return self.prompt_template.build_prompt(
+                prompt, 
+                context, 
+                tools_description,
+                xml_formatting=True,
+                context_messages=context_messages
+            )
+        else:
+            # Fallback to legacy string context for backward compatibility
+            return self.prompt_template.build_prompt(prompt, context, tools_description)
 
     async def close(self) -> None:
         """Close the HTTP session if we own it."""
