@@ -131,7 +131,7 @@ impl App {
         user_update_tx: mpsc::UnboundedSender<UserUpdateRequest>,
         api_host: String,
     ) -> App {
-        let api_endpoint = format!("http://{}/completion", api_host);
+        let api_endpoint = format!("http://{}/api/generate", api_host);
         App {
             client: Client::new(),
             message_history: Arc::new(Mutex::new(Vec::new())),
