@@ -42,9 +42,9 @@ class TestBaseTool:
 
             class InvalidTool1(BaseTool):
                 description = "Test tool"
-                parameters = {"type": "object"}
+                parameters: ClassVar = {"type": "object"}
 
-                async def execute(self, **kwargs):
+                async def execute(self, **_kwargs):
                     return ToolExecutionResult(success=True, data="test")
 
         # Should fail without description
@@ -52,9 +52,9 @@ class TestBaseTool:
 
             class InvalidTool2(BaseTool):
                 name = "test"
-                parameters = {"type": "object"}
+                parameters: ClassVar = {"type": "object"}
 
-                async def execute(self, **kwargs):
+                async def execute(self, **_kwargs):
                     return ToolExecutionResult(success=True, data="test")
 
     def test_parameter_validation(self):
@@ -63,7 +63,7 @@ class TestBaseTool:
         class TestTool(BaseTool):
             name = "test"
             description = "Test tool"
-            parameters = {
+            parameters: ClassVar = {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string"},
@@ -73,7 +73,7 @@ class TestBaseTool:
                 "required": ["name"],
             }
 
-            async def execute(self, **kwargs):
+            async def execute(self, **_kwargs):
                 return ToolExecutionResult(success=True, data="test")
 
         tool = TestTool()
@@ -101,9 +101,9 @@ class TestToolRegistry:
         class TestTool(BaseTool):
             name = "test"
             description = "Test tool"
-            parameters = {"type": "object"}
+            parameters: ClassVar = {"type": "object"}
 
-            async def execute(self, **kwargs):
+            async def execute(self, **_kwargs):
                 return ToolExecutionResult(success=True, data="test result")
 
         tool = TestTool()
@@ -128,9 +128,9 @@ class TestToolRegistry:
         class TestTool(BaseTool):
             name = "test"
             description = "Test tool"
-            parameters = {"type": "object"}
+            parameters: ClassVar = {"type": "object"}
 
-            async def execute(self, **kwargs):
+            async def execute(self, **_kwargs):
                 return ToolExecutionResult(success=True, data="test result")
 
         tool = TestTool()
@@ -152,7 +152,7 @@ class TestToolRegistry:
         class TestTool(BaseTool):
             name = "test"
             description = "Test tool"
-            parameters = {
+            parameters: ClassVar = {
                 "type": "object",
                 "properties": {"message": {"type": "string"}},
                 "required": ["message"],

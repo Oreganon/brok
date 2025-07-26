@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from brok.tools.registry import ToolRegistry
+
 
 @dataclass
 class LLMConfig:
