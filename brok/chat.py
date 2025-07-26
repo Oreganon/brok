@@ -190,6 +190,7 @@ class ChatClient:
         bot_name: str = "brok",
         respond_to_mentions: bool = True,
         respond_to_commands: bool = True,
+        ignore_users: list[str] | None = None,
     ):
         """Initialize chat client.
 
@@ -199,12 +200,18 @@ class ChatClient:
             bot_name: Bot name for mention detection
             respond_to_mentions: Whether to respond to mentions
             respond_to_commands: Whether to parse and respond to commands
+            ignore_users: List of usernames to ignore (bot name is automatically added)
         """
         self._filters = response_filters
         self._context_window_size = context_window_size
         self._bot_name = bot_name
         self._respond_to_mentions = respond_to_mentions
         self._respond_to_commands = respond_to_commands
+
+        # Initialize ignore_users list and automatically add bot name (all lowercase for case-insensitive matching)
+        self._ignore_users = {user.lower() for user in (ignore_users or [])}
+        self._ignore_users.add(bot_name.lower())  # Add bot name (case-insensitive)
+
         self._context_messages: list[str] = []
         self._processing_queue: asyncio.Queue[ProcessedMessage] = asyncio.Queue()
         self._session: AsyncSession | None = None
@@ -291,6 +298,11 @@ class ChatClient:
         # Skip empty messages
         if not message.strip():
             return False, "keyword", None
+
+        # Skip messages from ignored users (including the bot itself)
+        if sender.lower() in self._ignore_users:
+            logger.debug(f"Ignoring message from ignored user: {sender}")
+            return False, "ignored", None
 
         # Check for commands first (highest priority)
         if self._respond_to_commands:
