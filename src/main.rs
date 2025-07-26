@@ -131,7 +131,7 @@ impl App {
         user_update_tx: mpsc::UnboundedSender<UserUpdateRequest>,
         api_host: String,
     ) -> App {
-        let api_endpoint = format!("http://{}/api/generate", api_host);
+        let api_endpoint = format!("http://{api_host}/api/generate");
         App {
             client: Client::new(),
             message_history: Arc::new(Mutex::new(Vec::new())),
@@ -145,7 +145,7 @@ impl App {
     }
 
     async fn calculate(&self, expression: &str) -> Result<ToolResult, String> {
-        println!("[DEBUG] Calculating expression: {}", expression);
+        println!("[DEBUG] Calculating expression: {expression}");
 
         // Input sanitization - only allow safe mathematical characters
         let allowed_chars = "0123456789+-*/().^ ";
@@ -193,35 +193,35 @@ impl App {
                             } else {
                                 Ok(ToolResult {
                                     success: true,
-                                    content: format!("{} = {}", expression, result),
+                                    content: format!("{expression} = {result}"),
                                 })
                             }
                         } else {
                             let error = String::from_utf8_lossy(&output.stderr);
                             Ok(ToolResult {
                                 success: false,
-                                content: format!("Calculation error: {}", error),
+                                content: format!("Calculation error: {error}"),
                             })
                         }
                     }
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        content: format!("Failed to execute calculation: {}", e),
+                        content: format!("Failed to execute calculation: {e}"),
                     }),
                 }
             }
             Err(e) => Ok(ToolResult {
                 success: false,
-                content: format!("Failed to start calculator: {}", e),
+                content: format!("Failed to start calculator: {e}"),
             }),
         }
     }
 
     async fn get_weather(&self, location: &str) -> Result<ToolResult, String> {
-        println!("[DEBUG] Getting weather for location: {}", location);
+        println!("[DEBUG] Getting weather for location: {location}");
 
-        let url = format!("https://wttr.in/{}?format=j1", location);
-        println!("[DEBUG] Weather API URL: {}", url);
+        let url = format!("https://wttr.in/{location}?format=j1");
+        println!("[DEBUG] Weather API URL: {url}");
 
         let response = self
             .client
@@ -233,7 +233,7 @@ impl App {
 
         if response.status().is_success() {
             let response_text = response.text().await.map_err(|e| e.to_string())?;
-            println!("[DEBUG] Raw weather API response: {}", response_text);
+            println!("[DEBUG] Raw weather API response: {response_text}");
 
             let weather_data: WeatherResponse =
                 serde_json::from_str(&response_text).map_err(|e| e.to_string())?;
@@ -312,7 +312,7 @@ impl App {
                 .trim()
                 .to_string();
 
-            println!("[DEBUG] Extracted expression: '{}'", clean_expression);
+            println!("[DEBUG] Extracted expression: '{clean_expression}'");
 
             Some(ToolCall::Calculator {
                 expression: clean_expression,
@@ -346,8 +346,7 @@ impl App {
                 .collect::<String>();
 
             println!(
-                "[DEBUG] Extracted location: '{}', cleaned: '{}'",
-                location, clean_location
+                "[DEBUG] Extracted location: '{location}', cleaned: '{clean_location}'"
             );
 
             Some(ToolCall::Weather {
@@ -363,11 +362,11 @@ impl App {
         prompt: String,
         message_history: &[String],
     ) -> Result<String, String> {
-        println!("[DEBUG] Getting AI response for prompt: {}", prompt);
+        println!("[DEBUG] Getting AI response for prompt: {prompt}");
 
         // Check if this is a tool call
         if let Some(tool_call) = self.detect_tool_call(&prompt) {
-            println!("[DEBUG] Detected tool call: {:?}", tool_call);
+            println!("[DEBUG] Detected tool call: {tool_call:?}");
 
             match tool_call {
                 ToolCall::Weather { location } => {
@@ -376,21 +375,21 @@ impl App {
                             if result.success {
                                 // Pass tool result to LLM for response generation
                                 let tool_context = format!("Tool call result: {}", result.content);
-                                let enhanced_prompt = format!("The user asked: \"{}\" and I retrieved this information: {}. Please provide a natural response.", prompt, tool_context);
+                                let enhanced_prompt = format!("The user asked: \"{prompt}\" and I retrieved this information: {tool_context}. Please provide a natural response.");
                                 return self
                                     .get_llm_response(enhanced_prompt, message_history)
                                     .await;
                             } else {
                                 let tool_context = format!("Tool call failed: {}", result.content);
-                                let enhanced_prompt = format!("The user asked: \"{}\" but the tool call failed: {}. Please provide an appropriate error response.", prompt, tool_context);
+                                let enhanced_prompt = format!("The user asked: \"{prompt}\" but the tool call failed: {tool_context}. Please provide an appropriate error response.");
                                 return self
                                     .get_llm_response(enhanced_prompt, message_history)
                                     .await;
                             }
                         }
                         Err(e) => {
-                            let tool_context = format!("Tool call error: {}", e);
-                            let enhanced_prompt = format!("The user asked: \"{}\" but I encountered an error: {}. Please provide an appropriate error response.", prompt, tool_context);
+                            let tool_context = format!("Tool call error: {e}");
+                            let enhanced_prompt = format!("The user asked: \"{prompt}\" but I encountered an error: {tool_context}. Please provide an appropriate error response.");
                             return self
                                 .get_llm_response(enhanced_prompt, message_history)
                                 .await;
@@ -403,21 +402,21 @@ impl App {
                             if result.success {
                                 // Pass tool result to LLM for response generation
                                 let tool_context = format!("Tool call result: {}", result.content);
-                                let enhanced_prompt = format!("The user asked: \"{}\" and I calculated: {}. Please provide a natural response.", prompt, tool_context);
+                                let enhanced_prompt = format!("The user asked: \"{prompt}\" and I calculated: {tool_context}. Please provide a natural response.");
                                 return self
                                     .get_llm_response(enhanced_prompt, message_history)
                                     .await;
                             } else {
                                 let tool_context = format!("Tool call failed: {}", result.content);
-                                let enhanced_prompt = format!("The user asked: \"{}\" but the calculation failed: {}. Please provide an appropriate error response.", prompt, tool_context);
+                                let enhanced_prompt = format!("The user asked: \"{prompt}\" but the calculation failed: {tool_context}. Please provide an appropriate error response.");
                                 return self
                                     .get_llm_response(enhanced_prompt, message_history)
                                     .await;
                             }
                         }
                         Err(e) => {
-                            let tool_context = format!("Tool call error: {}", e);
-                            let enhanced_prompt = format!("The user asked: \"{}\" but I encountered an error: {}. Please provide an appropriate error response.", prompt, tool_context);
+                            let tool_context = format!("Tool call error: {e}");
+                            let enhanced_prompt = format!("The user asked: \"{prompt}\" but I encountered an error: {tool_context}. Please provide an appropriate error response.");
                             return self
                                 .get_llm_response(enhanced_prompt, message_history)
                                 .await;
@@ -444,9 +443,9 @@ impl App {
             for username in &detected_users {
                 let user_info = self.read_user_info(username).await;
                 if !user_info.trim().is_empty() {
-                    user_context.push_str(&format!("{}: {}\n", username, user_info));
+                    user_context.push_str(&format!("{username}: {user_info}\n"));
                 } else {
-                    user_context.push_str(&format!("{}: No information available\n", username));
+                    user_context.push_str(&format!("{username}: No information available\n"));
                 }
             }
             user_context.push('\n');
@@ -467,11 +466,11 @@ User question: did jbpratt remember to renew the sgg domain? <reply>No don't hav
 
 (notice how the emotes are written! No quotes, no parenthesis, no colon, just the emote)
 
-user context: {}
+user context: {user_context}
 
-context: {}
+context: {context}
 
-User question: {}", user_context, context, prompt);
+User question: {prompt}");
         let request = OllamaRequest {
             //model: "qwen3:1.7b".to_string(),
             model: "granite3.3:2b".to_string(),
@@ -501,7 +500,7 @@ User question: {}", user_context, context, prompt);
 
         // Parse the reply from <reply></reply> tags
         let parsed_reply = self.parse_reply(&ollama_response.response);
-        println!("[DEBUG] Parsed reply: {}", parsed_reply);
+        println!("[DEBUG] Parsed reply: {parsed_reply}");
         Ok(parsed_reply)
     }
 
@@ -530,7 +529,7 @@ User question: {}", user_context, context, prompt);
     }
 
     async fn add_message_to_history(&self, sender: &str, message: &str) {
-        let formatted_message = format!("{}: {}", sender, message);
+        let formatted_message = format!("{sender}: {message}");
         let mut history = self.message_history.lock().await;
         history.push(formatted_message);
 
@@ -553,7 +552,7 @@ User question: {}", user_context, context, prompt);
         };
 
         if let Err(e) = self.inference_tx.send(request) {
-            eprintln!("[DEBUG] Failed to queue inference: {}", e);
+            eprintln!("[DEBUG] Failed to queue inference: {e}");
         }
 
         response_rx
@@ -573,7 +572,7 @@ User question: {}", user_context, context, prompt);
 
         let mut pending = self.pending_messages.lock().await;
         pending.push(pending_message);
-        println!("[DEBUG] Added pending message with ID: {}", message_id);
+        println!("[DEBUG] Added pending message with ID: {message_id}");
         println!(
             "[DEBUG] Current pending queue ({} messages):",
             pending.len()
@@ -594,8 +593,7 @@ User question: {}", user_context, context, prompt);
             println!("[DEBUG] Confirmed message sent and removed from pending: ID {} with content validation", removed.id);
         } else {
             println!(
-                "[DEBUG] Message ID {} not found or content mismatch - not removing from pending",
-                message_id
+                "[DEBUG] Message ID {message_id} not found or content mismatch - not removing from pending"
             );
         }
     }
@@ -624,18 +622,16 @@ User question: {}", user_context, context, prompt);
             Ok(entries) => {
                 let mut users = self.available_users.lock().await;
                 users.clear();
-                for entry in entries {
-                    if let Ok(entry) = entry {
-                        if let Some(filename) = entry.file_name().to_str() {
-                            users.insert(filename.to_string());
-                        }
+                for entry in entries.flatten() {
+                    if let Some(filename) = entry.file_name().to_str() {
+                        users.insert(filename.to_string());
                     }
                 }
                 println!("[DEBUG] Loaded {} users", users.len());
                 Ok(())
             }
             Err(e) => {
-                eprintln!("[DEBUG] Failed to read users directory: {}", e);
+                eprintln!("[DEBUG] Failed to read users directory: {e}");
                 Err(e.to_string())
             }
         }
@@ -655,7 +651,7 @@ User question: {}", user_context, context, prompt);
     }
 
     async fn read_user_info(&self, username: &str) -> String {
-        match read_to_string(format!("users/{}", username)) {
+        match read_to_string(format!("users/{username}")) {
             Ok(content) => content,
             Err(_) => String::new(),
         }
@@ -669,7 +665,7 @@ User question: {}", user_context, context, prompt);
         };
 
         if let Err(e) = self.user_update_tx.send(request) {
-            eprintln!("[DEBUG] Failed to queue user update: {}", e);
+            eprintln!("[DEBUG] Failed to queue user update: {e}");
         }
     }
 }
@@ -697,15 +693,15 @@ async fn inference_worker(
             Ok(response) => {
                 println!("[DEBUG] Inference completed, sending response");
                 if let Err(e) = request.response_tx.send(response) {
-                    eprintln!("[DEBUG] Failed to send response: {}", e);
+                    eprintln!("[DEBUG] Failed to send response: {e}");
                 }
             }
             Err(e) => {
-                eprintln!("[DEBUG] Inference failed: {}", e);
+                eprintln!("[DEBUG] Inference failed: {e}");
                 let error_response =
                     "Sorry, I encountered an error processing your request.".to_string();
                 if let Err(e) = request.response_tx.send(error_response) {
-                    eprintln!("[DEBUG] Failed to send error response: {}", e);
+                    eprintln!("[DEBUG] Failed to send error response: {e}");
                 }
             }
         }
@@ -786,7 +782,7 @@ async fn main() {
 
     // Load available users
     if let Err(e) = app.load_available_users().await {
-        eprintln!("[WARNING] Failed to load users: {}", e);
+        eprintln!("[WARNING] Failed to load users: {e}");
     }
 
     // Start inference worker
@@ -831,13 +827,13 @@ async fn main() {
                 // Wait before sending to avoid rate limiting
                 time::sleep(time::Duration::from_millis(500)).await;
 
-                println!("[DEBUG] Sending response to chat: {}", response);
+                println!("[DEBUG] Sending response to chat: {response}");
 
                 // Add to pending messages before sending
                 let message_id = app.add_pending_message(response.clone()).await;
 
                 conn.send(&response);
-                println!("[DEBUG] Response sent successfully with ID: {}", message_id);
+                println!("[DEBUG] Response sent successfully with ID: {message_id}");
 
                 // Add bot's response to history
                 app.add_message_to_history(bot_account, &response).await;
@@ -900,7 +896,7 @@ async fn main() {
                 println!("[DEBUG] Received message");
 
                 let data: String = msg.message.to_string();
-                println!("[DEBUG] Message content: {}", data);
+                println!("[DEBUG] Message content: {data}");
                 println!("[DEBUG] Message from user: {}", msg.sender);
 
                 // Check if this message is an echo of our own message
@@ -919,7 +915,7 @@ async fn main() {
                         .strip_prefix(&format!("@{bot_account} "))
                         .unwrap_or(&data)
                         .to_string();
-                    println!("[DEBUG] Extracted prompt: {}", rest);
+                    println!("[DEBUG] Extracted prompt: {rest}");
 
                     // Queue inference asynchronously
                     let response_rx = app.queue_inference(rest, msg.sender.clone()).await;
