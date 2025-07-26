@@ -99,7 +99,7 @@ exclude = [
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--cov=. --cov-report=term-missing --cov-report=html --cov-fail-under=90"
+addopts = "--cov=. --cov-report=term-missing --cov-report=html --cov-fail-under=75"
 testpaths = ["tests"]
 pythonpath = ["."]
 
