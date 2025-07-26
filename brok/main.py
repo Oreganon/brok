@@ -113,6 +113,7 @@ async def main() -> None:
             bot_name=config.bot_name,
             respond_to_mentions=config.respond_to_mentions,
             respond_to_commands=config.respond_to_commands,
+            ignore_users=config.ignore_users,
         )
 
         # Create LLM provider

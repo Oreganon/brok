@@ -158,7 +158,7 @@ class TestChatClient:
                 )
 
     @pytest.mark.asyncio
-    async def test_should_respond_to_pure_keywords(self, chat_client: ChatClient):
+    async def test_should_respond_to_pure_keywords(self, _chat_client: ChatClient):
         """Test message filtering with pure keyword matches that aren't parsed as commands."""
         # Create a client with keywords that won't be parsed as commands
         filters = create_default_filters(["hey", "hello"])
@@ -467,6 +467,98 @@ class TestChatClient:
 
         # Assert - Just verify it doesn't crash
         assert True
+
+    @pytest.mark.asyncio
+    async def test_should_ignore_bot_self_messages(self, response_filters):
+        """Test that bot ignores its own messages to prevent self-prompting."""
+        # Arrange
+        chat_client = ChatClient(
+            response_filters=response_filters,
+            context_window_size=5,
+            bot_name="testbot",
+            respond_to_mentions=True,
+            respond_to_commands=True,
+        )
+
+        # Act - bot sends message to itself
+        (
+            should_respond,
+            message_type,
+            command,
+        ) = await chat_client.should_respond_to_message("Hello everyone!", "testbot")
+
+        # Assert
+        assert should_respond is False
+        assert message_type == "ignored"
+        assert command is None
+
+    @pytest.mark.asyncio
+    async def test_should_ignore_configured_users(self, response_filters):
+        """Test that bot ignores messages from users in ignore_users list."""
+        # Arrange
+        chat_client = ChatClient(
+            response_filters=response_filters,
+            context_window_size=5,
+            bot_name="testbot",
+            respond_to_mentions=True,
+            respond_to_commands=True,
+            ignore_users=["spammer", "trolluser"],
+        )
+
+        # Act - ignored user sends message
+        (
+            should_respond,
+            message_type,
+            command,
+        ) = await chat_client.should_respond_to_message("@testbot hello", "spammer")
+
+        # Assert
+        assert should_respond is False
+        assert message_type == "ignored"
+        assert command is None
+
+    @pytest.mark.asyncio
+    async def test_ignore_users_case_insensitive(self, response_filters):
+        """Test that user ignoring is case-insensitive."""
+        # Arrange
+        chat_client = ChatClient(
+            response_filters=response_filters,
+            context_window_size=5,
+            bot_name="TestBot",  # Mixed case bot name
+            respond_to_mentions=True,
+            respond_to_commands=True,
+            ignore_users=["SpamUser"],  # Mixed case ignored user
+        )
+
+        test_cases = [
+            ("testbot", True),  # Bot name in different case
+            ("TESTBOT", True),  # Bot name in caps
+            ("spamuser", True),  # Ignored user in different case
+            ("SPAMUSER", True),  # Ignored user in caps
+            ("normaluser", False),  # Normal user should not be ignored
+        ]
+
+        for sender, should_be_ignored in test_cases:
+            # Act - using a mention format that won't be parsed as command
+            (
+                should_respond,
+                message_type,
+                command,
+            ) = await chat_client.should_respond_to_message(
+                "Hi @TestBot how are you?", sender
+            )
+
+            # Assert
+            if should_be_ignored:
+                assert should_respond is False, f"Expected to ignore {sender}"
+                assert message_type == "ignored", (
+                    f"Expected 'ignored' type for {sender}"
+                )
+            else:
+                assert should_respond is True, f"Expected to respond to {sender}"
+                assert message_type == "mention", (
+                    f"Expected 'mention' type for {sender}"
+                )
 
 
 class TestDefaultFilters:
