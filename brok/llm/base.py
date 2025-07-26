@@ -107,7 +107,7 @@ class LLMProvider(ABC):
         """
         return {}
 
-    def set_tool_registry(self, registry: "ToolRegistry") -> None:
+    def set_tool_registry(self, registry: ToolRegistry) -> None:
         """Set the tool registry for this LLM provider.
 
         Args:

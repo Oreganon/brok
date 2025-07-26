@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import re
+from typing import ClassVar
+
 import pytest
 
 from brok.tools import (
     BaseTool,
     CalculatorTool,
+    DateTimeTool,
     ToolExecutionError,
     ToolExecutionResult,
     ToolParser,
@@ -23,11 +27,11 @@ class TestBaseTool:
 
         # Should work with valid metadata
         class ValidTool(BaseTool):
-            name = "test"
-            description = "Test tool"
-            parameters = {"type": "object"}
+            name: ClassVar[str] = "test"
+            description: ClassVar[str] = "Test tool"
+            parameters: ClassVar[dict] = {"type": "object"}
 
-            async def execute(self, **kwargs):
+            async def execute(self, **_kwargs):
                 return ToolExecutionResult(success=True, data="test")
 
         tool = ValidTool()
@@ -367,3 +371,96 @@ class TestCalculatorTool:
         result = await tool.execute(expression="2pi")
         assert result.success
         # Should be approximately 6.28 (2 * pi)
+
+
+class TestDateTimeTool:
+    """Test the datetime tool."""
+
+    @pytest.mark.asyncio
+    async def test_datetime_tool_metadata(self):
+        """Test datetime tool metadata."""
+        tool = DateTimeTool()
+        assert tool.name == "datetime"
+        assert "date and time" in tool.description.lower()
+        assert "format" in tool.parameters["properties"]
+        assert "timezone" in tool.parameters["properties"]
+
+    @pytest.mark.asyncio
+    async def test_readable_format(self):
+        """Test readable datetime format (default)."""
+        tool = DateTimeTool()
+        result = await tool.execute()
+        assert result.success
+        assert "Current date and time:" in result.data
+        assert result.metadata["format_requested"] == "readable"
+        assert "timestamp" in result.metadata
+        assert "iso_format" in result.metadata
+
+    @pytest.mark.asyncio
+    async def test_iso_format(self):
+        """Test ISO 8601 datetime format."""
+        tool = DateTimeTool()
+        result = await tool.execute(format="iso")
+        assert result.success
+        assert "Current time (ISO 8601):" in result.data
+        assert result.metadata["format_requested"] == "iso"
+        # Should contain T separator for ISO format
+        assert "T" in result.data
+
+    @pytest.mark.asyncio
+    async def test_date_only_format(self):
+        """Test date-only format."""
+        tool = DateTimeTool()
+        result = await tool.execute(format="date")
+        assert result.success
+        assert "Current date:" in result.data
+        assert result.metadata["format_requested"] == "date"
+        # Should match YYYY-MM-DD pattern
+        assert re.search(r"\d{4}-\d{2}-\d{2}", result.data)
+
+    @pytest.mark.asyncio
+    async def test_time_only_format(self):
+        """Test time-only format."""
+        tool = DateTimeTool()
+        result = await tool.execute(format="time")
+        assert result.success
+        assert "Current time:" in result.data
+        assert result.metadata["format_requested"] == "time"
+        # Should match HH:MM:SS pattern
+        assert re.search(r"\d{2}:\d{2}:\d{2}", result.data)
+
+    @pytest.mark.asyncio
+    async def test_timestamp_format(self):
+        """Test Unix timestamp format."""
+        tool = DateTimeTool()
+        result = await tool.execute(format="timestamp")
+        assert result.success
+        assert "Current Unix timestamp:" in result.data
+        assert result.metadata["format_requested"] == "timestamp"
+        # Should contain digits for timestamp
+        assert re.search(r"\d+", result.data)
+
+    @pytest.mark.asyncio
+    async def test_invalid_format(self):
+        """Test that invalid format falls back to readable."""
+        tool = DateTimeTool()
+        result = await tool.execute(format="invalid")
+        assert result.success
+        assert "Current date and time:" in result.data
+        assert result.metadata["format_requested"] == "invalid"
+
+    @pytest.mark.asyncio
+    async def test_timezone_handling(self):
+        """Test timezone parameter handling."""
+        tool = DateTimeTool()
+
+        # Test with valid timezone (fallback gracefully if not available)
+        result = await tool.execute(timezone="UTC")
+        assert result.success
+        # Should either include UTC or gracefully fallback to system
+        assert result.metadata["timezone"] in ("UTC", "system")
+
+        # Test with invalid timezone (should fallback to system)
+        result = await tool.execute(timezone="Invalid/Timezone")
+        assert result.success
+        assert result.metadata["timezone"] == "system"

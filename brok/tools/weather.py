@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import ClassVar
 
 import aiohttp
 
@@ -23,9 +24,9 @@ class WeatherTool(BaseTool):
         >>> print(result.data)  # "Weather in London: Clear, 18°C, Light breeze"
     """
 
-    name = "weather"
-    description = "Get current weather information for a city"
-    parameters = {
+    name: ClassVar[str] = "weather"
+    description: ClassVar[str] = "Get current weather information for a city"
+    parameters: ClassVar[dict] = {
         "type": "object",
         "properties": {
             "city": {
@@ -75,43 +76,43 @@ class WeatherTool(BaseTool):
         url = f"{self.base_url}/{city}?format=4"
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        weather_text = await response.text()
-                        weather_text = weather_text.strip()
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, timeout=10) as response,
+            ):
+                if response.status == 200:
+                    weather_text = await response.text()
+                    weather_text = weather_text.strip()
 
-                        if weather_text and "Unknown location" not in weather_text:
-                            # Format the response nicely
-                            formatted_weather = (
-                                f"Weather in {city.title()}: {weather_text}"
-                            )
+                    if weather_text and "Unknown location" not in weather_text:
+                        # Format the response nicely
+                        formatted_weather = f"Weather in {city.title()}: {weather_text}"
 
-                            return ToolExecutionResult(
-                                success=True,
-                                data=formatted_weather,
-                                metadata={
-                                    "source": "wttr.in",
-                                    "city": city,
-                                    "raw_response": weather_text,
-                                },
-                            )
-                        else:
-                            return ToolExecutionResult(
-                                success=False,
-                                data="",
-                                error=f"City '{city}' not found or invalid location",
-                            )
+                        return ToolExecutionResult(
+                            success=True,
+                            data=formatted_weather,
+                            metadata={
+                                "source": "wttr.in",
+                                "city": city,
+                                "raw_response": weather_text,
+                            },
+                        )
                     else:
-                        logger.warning(f"wttr.in API error {response.status}")
                         return ToolExecutionResult(
                             success=False,
                             data="",
-                            error=f"Weather service returned error {response.status}",
+                            error=f"City '{city}' not found or invalid location",
                         )
+                else:
+                    logger.warning(f"wttr.in API error {response.status}")
+                    return ToolExecutionResult(
+                        success=False,
+                        data="",
+                        error=f"Weather service returned error {response.status}",
+                    )
 
-        except aiohttp.ClientError as e:
-            logger.exception(f"HTTP error fetching weather for {city}: {e}")
+        except aiohttp.ClientError:
+            logger.exception(f"HTTP error fetching weather for {city}")
             return ToolExecutionResult(
                 success=False, data="", error="Unable to connect to weather service"
             )

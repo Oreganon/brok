@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from brok.exceptions import BrokError
 
@@ -58,9 +58,9 @@ class BaseTool(ABC):
     """
 
     # Tool metadata - must be defined by subclasses
-    name: str = ""
-    description: str = ""
-    parameters: dict[str, Any] = {}
+    name: ClassVar[str] = ""
+    description: ClassVar[str] = ""
+    parameters: ClassVar[dict[str, Any]] = {}
 
     def __init_subclass__(cls, **kwargs):
         """Validate tool metadata when subclassing."""
@@ -73,7 +73,7 @@ class BaseTool(ABC):
                 f"Tool {cls.__name__} must define a 'description' attribute"
             )
         if not isinstance(cls.parameters, dict):
-            raise ValueError(f"Tool {cls.__name__} must define 'parameters' as a dict")
+            raise TypeError(f"Tool {cls.__name__} must define 'parameters' as a dict")
 
     @abstractmethod
     async def execute(self, **kwargs) -> ToolExecutionResult:

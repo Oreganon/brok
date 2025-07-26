@@ -159,15 +159,18 @@ class ToolParser:
                                 # Normalize single quotes to double quotes for JSON
                                 normalized_json = potential_json.replace("'", '"')
                                 data = json.loads(normalized_json)
-                                tool_name = data.get("tool", "").lower()
+                                json_tool_name = data.get("tool", "").lower()
                                 params = data.get("params", data.get("parameters", {}))
 
-                                if tool_name and tool_name in self.available_tools:
+                                if (
+                                    json_tool_name
+                                    and json_tool_name in self.available_tools
+                                ):
                                     logger.debug(
-                                        f"Parsed JSON tool call (fallback): {tool_name}"
+                                        f"Parsed JSON tool call (fallback): {json_tool_name}"
                                     )
                                     return ToolCall(
-                                        tool_name=tool_name,
+                                        tool_name=json_tool_name,
                                         parameters=params,
                                         raw_text=potential_json,
                                     )
@@ -191,18 +194,21 @@ class ToolParser:
             pattern = r"\\[TOOL:([^\\]]+)\\]([^\\[]*?)\\[/TOOL\\]"
             matches = re.findall(pattern, response, re.IGNORECASE)
 
-            for tool_name, params_str in matches:
-                tool_name = tool_name.strip().lower()
+            for explicit_tool_name, params_str in matches:
+                explicit_tool_name = explicit_tool_name.strip().lower()
 
-                if not self.available_tools or tool_name in self.available_tools:
+                if (
+                    not self.available_tools
+                    or explicit_tool_name in self.available_tools
+                ):
                     # Parse parameters
                     params = self._parse_parameter_string(params_str)
 
-                    logger.debug(f"Parsed explicit tool call: {tool_name}")
+                    logger.debug(f"Parsed explicit tool call: {explicit_tool_name}")
                     return ToolCall(
-                        tool_name=tool_name,
+                        tool_name=explicit_tool_name,
                         parameters=params,
-                        raw_text=f"[TOOL:{tool_name}]{params_str}[/TOOL]",
+                        raw_text=f"[TOOL:{explicit_tool_name}]{params_str}[/TOOL]",
                     )
 
         except Exception as e:
@@ -257,26 +263,41 @@ class ToolParser:
                         raw_text=response,
                     )
 
-        # Time tool detection
-        if "time" in self.available_tools:
-            time_patterns = [
+        # DateTime tool detection
+        if "datetime" in self.available_tools:
+            datetime_patterns = [
                 r"what\s+time\s+is\s+it(?:\s+in\s+([a-zA-Z\s,/]+))?",
                 r"current\s+time(?:\s+in\s+([a-zA-Z\s,/]+))?",
+                r"what\s+(?:is\s+)?(?:the\s+)?current\s+date",
+                r"what\s+(?:is\s+)?(?:the\s+)?date",
+                r"get\s+(?:me\s+)?(?:the\s+)?(?:current\s+)?(?:date\s+and\s+)?time",
+                r"show\s+(?:me\s+)?(?:the\s+)?(?:current\s+)?(?:date\s+and\s+)?time",
+                r"tell\s+me\s+(?:the\s+)?(?:current\s+)?(?:date\s+and\s+)?time",
+                r"(?:current\s+)?datetime",
                 r"time\s+in\s+([a-zA-Z\s,/]+)",
             ]
 
-            for pattern in time_patterns:
+            for pattern in datetime_patterns:
                 match = re.search(pattern, response_lower)
                 if match:
-                    timezone = match.group(1).strip() if match.group(1) else "UTC"
-                    logger.debug(
-                        f"Parsed natural language time request for: {timezone}"
-                    )
-                    return ToolCall(
-                        tool_name="time",
-                        parameters={"timezone": timezone},
-                        raw_text=response,
-                    )
+                    # Check if timezone was captured
+                    if match.groups() and match.group(1):
+                        timezone = match.group(1).strip()
+                        logger.debug(
+                            f"Parsed natural language datetime request with timezone: {timezone}"
+                        )
+                        return ToolCall(
+                            tool_name="datetime",
+                            parameters={"timezone": timezone},
+                            raw_text=response,
+                        )
+                    else:
+                        logger.debug("Parsed natural language datetime request")
+                        return ToolCall(
+                            tool_name="datetime",
+                            parameters={},
+                            raw_text=response,
+                        )
 
         return None
 
