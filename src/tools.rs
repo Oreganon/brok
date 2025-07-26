@@ -165,10 +165,8 @@ impl ToolManager {
                 .map_err(|e| ToolError::HttpRequest(format!("Failed to read response: {e}")))?;
             println!("[DEBUG] Raw weather API response: {response_text}");
 
-            let weather_data: WeatherResponse =
-                serde_json::from_str(&response_text).map_err(|e| {
-                    ToolError::JsonParsing(format!("Weather data parsing failed: {e}"))
-                })?;
+            let weather_data: WeatherResponse = serde_json::from_str(&response_text)
+                .map_err(|e| ToolError::JsonParsing(format!("Weather data parsing failed: {e}")))?;
 
             if let Some(current) = weather_data.current_condition.first() {
                 let weather_desc = current
