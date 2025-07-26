@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio  # Added to catch asyncio.TimeoutError
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -128,7 +129,8 @@ class OllamaProvider(LLMProvider):
 
         except aiohttp.ClientError as e:
             raise LLMConnectionError(f"Failed to connect to Ollama: {e}") from e
-        except aiohttp.ServerTimeoutError as e:
+        # Handle timeout errors from aiohttp as well as generic asyncio timeouts
+        except (aiohttp.ServerTimeoutError, asyncio.TimeoutError) as e:
             raise LLMTimeoutError(f"Ollama request timed out: {e}") from e
         except Exception as e:
             if isinstance(e, LLMConnectionError | LLMTimeoutError | LLMGenerationError):
