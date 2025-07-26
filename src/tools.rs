@@ -487,7 +487,7 @@ mod tests {
 
         for input in dangerous_inputs {
             let result = manager.calculate(input).await;
-            assert!(result.is_err(), "Should reject dangerous input: {}", input);
+            assert!(result.is_err(), "Should reject dangerous input: {input}");
             assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
         }
     }
@@ -710,14 +710,12 @@ mod tests {
             let result = manager.detect_tool_call(input);
             assert!(
                 matches!(result, Some(ToolCall::Calculator { .. })),
-                "Should detect math in: {}",
-                input
+                "Should detect math in: {input}"
             );
             if let Some(ToolCall::Calculator { expression }) = result {
                 assert_eq!(
                     expression, expected,
-                    "Wrong expression extracted from: {}",
-                    input
+                    "Wrong expression extracted from: {input}"
                 );
             }
         }
@@ -727,7 +725,7 @@ mod tests {
 
         for input in non_math {
             let result = manager.detect_tool_call(input);
-            assert!(result.is_none(), "Should not detect math in: {}", input);
+            assert!(result.is_none(), "Should not detect math in: {input}");
         }
     }
 
@@ -748,15 +746,10 @@ mod tests {
             let result = manager.detect_tool_call(input);
             assert!(
                 matches!(result, Some(ToolCall::Weather { .. })),
-                "Should detect weather in: {}",
-                input
+                "Should detect weather in: {input}"
             );
             if let Some(ToolCall::Weather { location }) = result {
-                assert_eq!(
-                    location, expected,
-                    "Wrong location extracted from: {}",
-                    input
-                );
+                assert_eq!(location, expected, "Wrong location extracted from: {input}");
             }
         }
     }

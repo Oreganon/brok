@@ -680,7 +680,7 @@ mod tests {
 
         let long_reply =
             "This is a very long response that exceeds the 200 character limit ".repeat(5);
-        let response = format!("<reply>{}</reply>", long_reply);
+        let response = format!("<reply>{long_reply}</reply>");
         let result = manager.parse_reply(&response);
 
         // Should be truncated and have FeelsPepoMan suffix
@@ -882,7 +882,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_inference_worker_shutdown() {
-        let (inference_tx, inference_rx) = mpsc::unbounded_channel();
+        let (_inference_tx, inference_rx) = mpsc::unbounded_channel();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
         let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());

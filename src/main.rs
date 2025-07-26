@@ -572,7 +572,7 @@ mod tests {
 
         // Add 15 messages (exceeds the 10-message limit)
         for i in 1..=15 {
-            app.add_message_to_history("user", &format!("Message {}", i))
+            app.add_message_to_history("user", &format!("Message {i}"))
                 .await;
         }
 
@@ -903,7 +903,7 @@ mod tests {
     #[test]
     fn test_args_parsing_defaults() {
         // Test that we can parse minimal args
-        let args = Args::try_parse_from(&["brok", "--cookie", "/tmp/cookie"]);
+        let args = Args::try_parse_from(["brok", "--cookie", "/tmp/cookie"]);
         assert!(args.is_ok());
         let args = args.unwrap();
         assert_eq!(args.cookie, "/tmp/cookie");
@@ -915,7 +915,7 @@ mod tests {
 
     #[test]
     fn test_args_parsing_all_options() {
-        let args = Args::try_parse_from(&[
+        let args = Args::try_parse_from([
             "brok",
             "--cookie",
             "/tmp/cookie",
@@ -995,7 +995,7 @@ mod tests {
         app.add_message_to_history("user", unicode_message).await;
 
         let history = app.message_history.lock().await;
-        assert_eq!(history[0], format!("user: {}", unicode_message));
+        assert_eq!(history[0], format!("user: {unicode_message}"));
     }
 
     #[tokio::test]
@@ -1009,20 +1009,20 @@ mod tests {
 
         let task1 = tokio::spawn(async move {
             for i in 0..10 {
-                app1.add_message_to_history("user1", &format!("Message {}", i))
+                app1.add_message_to_history("user1", &format!("Message {i}"))
                     .await;
             }
         });
 
         let task2 = tokio::spawn(async move {
             for i in 0..10 {
-                app2.add_pending_message(format!("Pending {}", i)).await;
+                app2.add_pending_message(format!("Pending {i}")).await;
             }
         });
 
         let task3 = tokio::spawn(async move {
             for i in 0..10 {
-                app3.detect_users_in_message(&format!("Hello user{}", i))
+                app3.detect_users_in_message(&format!("Hello user{i}"))
                     .await;
             }
         });
