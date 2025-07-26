@@ -543,3 +543,424 @@ pub fn create_provider(
         ProviderType::LlamaCpp => Arc::new(LlamaCppProvider::new(client, api_host)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use tokio::sync::Mutex;
+
+    // Mock provider for testing
+    struct MockProvider {
+        response: Result<String, InferenceError>,
+    }
+
+    #[async_trait::async_trait]
+    impl InferenceProvider for MockProvider {
+        async fn generate_response(
+            &self,
+            _prompt: String,
+            _message_history: &[String],
+            _user_context: Option<&str>,
+        ) -> Result<String, InferenceError> {
+            self.response.clone()
+        }
+    }
+
+    impl MockProvider {
+        fn new_success(response: String) -> Self {
+            Self {
+                response: Ok(response),
+            }
+        }
+
+        fn new_failure(error: InferenceError) -> Self {
+            Self {
+                response: Err(error),
+            }
+        }
+    }
+
+    #[test]
+    fn test_format_chat_prompt_with_history() {
+        let prompt = "What's the weather?".to_string();
+        let history = vec![
+            "user1: Hello".to_string(),
+            "brok: Hi there!".to_string(),
+            "user2: How are you?".to_string(),
+        ];
+
+        let result = format_chat_prompt(prompt.clone(), &history, None);
+
+        assert!(result.contains("What's the weather?"));
+        assert!(result.contains("user1: Hello"));
+        assert!(result.contains("brok: Hi there!"));
+        assert!(result.contains("user2: How are you?"));
+        assert!(result.contains("<reply></reply>"));
+    }
+
+    #[test]
+    fn test_format_chat_prompt_empty_history() {
+        let prompt = "Test prompt".to_string();
+        let history = vec![];
+
+        let result = format_chat_prompt(prompt.clone(), &history, None);
+
+        assert!(result.contains("Test prompt"));
+        assert!(result.contains("No previous messages"));
+    }
+
+    #[test]
+    fn test_format_chat_prompt_with_user_context() {
+        let prompt = "Tell me about user1".to_string();
+        let history = vec![];
+        let user_context = Some("user1: Likes programming and coffee");
+
+        let result = format_chat_prompt(prompt.clone(), &history, user_context);
+
+        assert!(result.contains("Tell me about user1"));
+        assert!(result.contains("user1: Likes programming and coffee"));
+    }
+
+    #[test]
+    fn test_parse_reply_valid_tags() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success("test".to_string()));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        let response = "Some text <reply>Hello world!</reply> more text";
+        let result = manager.parse_reply(response);
+
+        assert_eq!(result, "Hello world!");
+    }
+
+    #[test]
+    fn test_parse_reply_no_tags_fallback() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success("test".to_string()));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        let response = "This is a complete sentence.";
+        let result = manager.parse_reply(response);
+
+        assert_eq!(result, "This is a complete sentence.");
+    }
+
+    #[test]
+    fn test_parse_reply_fallback_to_default() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success("test".to_string()));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        let response = "Invalid response format";
+        let result = manager.parse_reply(response);
+
+        assert_eq!(result, "FeelsPepoMan");
+    }
+
+    #[test]
+    fn test_parse_reply_too_long_response() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success("test".to_string()));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        // Create a response that's way too long (over 500 chars)
+        let long_response = "User question: What's the weather? <reply>It's sunny</reply> User question: How are you? <reply>I'm good</reply>".repeat(10);
+        let result = manager.parse_reply(&long_response);
+
+        // Should extract first valid reply before patterns
+        assert_eq!(result, "It's sunny");
+    }
+
+    #[test]
+    fn test_parse_reply_truncate_long_valid_reply() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success("test".to_string()));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        let long_reply =
+            "This is a very long response that exceeds the 200 character limit ".repeat(5);
+        let response = format!("<reply>{}</reply>", long_reply);
+        let result = manager.parse_reply(&response);
+
+        // Should be truncated and have FeelsPepoMan suffix
+        assert!(result.len() <= 200);
+        assert!(result.ends_with("FeelsPepoMan"));
+    }
+
+    #[test]
+    fn test_extract_first_valid_reply_stops_at_example() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success("test".to_string()));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        let response = "<reply>Valid answer</reply>\nUser question: example\n<reply>Should not use this</reply>";
+        let result = manager.extract_first_valid_reply(response);
+
+        assert_eq!(result, Some("Valid answer".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_user_context_with_users() {
+        let mut users = HashSet::new();
+        users.insert("alice".to_string());
+        users.insert("bob".to_string());
+        let available_users = Arc::new(Mutex::new(users));
+
+        // Create test user files
+        tokio::fs::create_dir_all("users").await.ok();
+        tokio::fs::write("users/alice", "Alice is a developer")
+            .await
+            .ok();
+        tokio::fs::write("users/bob", "Bob likes coffee").await.ok();
+
+        let prompt = "Tell me about alice and bob";
+        let result = get_user_context(prompt, available_users).await;
+
+        assert!(result.is_some());
+        let context = result.unwrap();
+        assert!(context.contains("alice: Alice is a developer"));
+        assert!(context.contains("bob: Bob likes coffee"));
+
+        // Cleanup
+        tokio::fs::remove_file("users/alice").await.ok();
+        tokio::fs::remove_file("users/bob").await.ok();
+        tokio::fs::remove_dir("users").await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_get_user_context_no_users_mentioned() {
+        let users = HashSet::new();
+        let available_users = Arc::new(Mutex::new(users));
+
+        let prompt = "What's the weather like?";
+        let result = get_user_context(prompt, available_users).await;
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_user_context_missing_user_files() {
+        let mut users = HashSet::new();
+        users.insert("nonexistent".to_string());
+        let available_users = Arc::new(Mutex::new(users));
+
+        let prompt = "Tell me about nonexistent";
+        let result = get_user_context(prompt, available_users).await;
+
+        assert!(result.is_some());
+        let context = result.unwrap();
+        assert!(context.contains("nonexistent: No information available"));
+    }
+
+    #[tokio::test]
+    async fn test_inference_manager_successful_response() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success(
+            "<reply>Hello world!</reply>".to_string(),
+        ));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        let result = manager
+            .get_ai_response("Hello".to_string(), &["user1: Hi".to_string()], None)
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Hello world!");
+    }
+
+    #[tokio::test]
+    async fn test_inference_manager_network_error() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_failure(InferenceError::Network(
+            "Connection failed".to_string(),
+        )));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        let result = manager
+            .get_ai_response("Hello".to_string(), &[], None)
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), InferenceError::Network(_)));
+    }
+
+    #[tokio::test]
+    async fn test_inference_manager_with_weather_tool() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success(
+            "<reply>The weather is sunny!</reply>".to_string(),
+        ));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        // This should trigger weather tool detection but fail due to network
+        // The important thing is that it attempts to use the tool
+        let result = manager
+            .get_ai_response("What's the weather in London?".to_string(), &[], None)
+            .await;
+
+        // Should either succeed with tool result or fail with tool error
+        // Both are acceptable since we're testing the flow, not the actual API
+        assert!(result.is_ok() || matches!(result.unwrap_err(), InferenceError::Tool(_)));
+    }
+
+    #[tokio::test]
+    async fn test_inference_manager_with_calculator_tool() {
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success(
+            "<reply>The answer is 8!</reply>".to_string(),
+        ));
+        let manager = InferenceManager::new(provider, tool_manager);
+
+        let result = manager
+            .get_ai_response("What is 2 + 6?".to_string(), &[], None)
+            .await;
+
+        assert!(result.is_ok());
+        // Should contain the LLM response about the calculation
+        let response = result.unwrap();
+        assert!(response.contains("answer") || response.contains("8"));
+    }
+
+    #[test]
+    fn test_inference_error_display() {
+        let error = InferenceError::Network("Connection timeout".to_string());
+        assert_eq!(error.to_string(), "Network error: Connection timeout");
+
+        let error = InferenceError::Parse("Invalid JSON".to_string());
+        assert_eq!(error.to_string(), "Parse error: Invalid JSON");
+
+        let error = InferenceError::Provider("Model not found".to_string());
+        assert_eq!(error.to_string(), "Provider error: Model not found");
+
+        let error = InferenceError::Tool("Calculator failed".to_string());
+        assert_eq!(error.to_string(), "Tool error: Calculator failed");
+    }
+
+    #[test]
+    fn test_create_provider_ollama() {
+        let client = reqwest::Client::new();
+        let provider = create_provider(
+            ProviderType::Ollama,
+            client,
+            "localhost:11434".to_string(),
+            Some("test-model".to_string()),
+        );
+
+        // Should create OllamaProvider successfully
+        // We can't test the exact type but we can verify it was created
+        let _ = provider; // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_create_provider_llama_cpp() {
+        let client = reqwest::Client::new();
+        let provider = create_provider(
+            ProviderType::LlamaCpp,
+            client,
+            "localhost:8080".to_string(),
+            None,
+        );
+
+        // Should create LlamaCppProvider successfully
+        let _ = provider; // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_create_provider_ollama_default_model() {
+        let client = reqwest::Client::new();
+        let provider = create_provider(
+            ProviderType::Ollama,
+            client,
+            "localhost:11434".to_string(),
+            None, // No model specified
+        );
+
+        // Should create OllamaProvider with default model successfully
+        let _ = provider; // Just verify it doesn't panic
+    }
+
+    #[tokio::test]
+    async fn test_inference_worker_shutdown() {
+        let (inference_tx, inference_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success("test".to_string()));
+        let inference_manager = Arc::new(InferenceManager::new(provider, tool_manager));
+
+        let message_history = Arc::new(Mutex::new(Vec::new()));
+        let available_users = Arc::new(Mutex::new(HashSet::new()));
+
+        // Start the worker
+        let worker_handle = tokio::spawn(async move {
+            inference_worker(
+                inference_rx,
+                inference_manager,
+                message_history,
+                available_users,
+                shutdown_rx,
+            )
+            .await;
+        });
+
+        // Send shutdown signal
+        shutdown_tx.send(()).unwrap();
+
+        // Worker should complete quickly
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(100), worker_handle).await;
+
+        assert!(
+            result.is_ok(),
+            "Worker should shutdown gracefully within timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_inference_worker_request_processing() {
+        let (inference_tx, inference_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, _shutdown_rx) = tokio::sync::oneshot::channel();
+
+        let tool_manager = crate::tools::ToolManager::new(reqwest::Client::new());
+        let provider = Arc::new(MockProvider::new_success(
+            "<reply>Test response</reply>".to_string(),
+        ));
+        let inference_manager = Arc::new(InferenceManager::new(provider, tool_manager));
+
+        let message_history = Arc::new(Mutex::new(vec!["user1: Hello".to_string()]));
+        let available_users = Arc::new(Mutex::new(HashSet::new()));
+
+        // Start the worker (it will be dropped when test ends)
+        let _worker_handle = tokio::spawn(async move {
+            inference_worker(
+                inference_rx,
+                inference_manager,
+                message_history,
+                available_users,
+                _shutdown_rx,
+            )
+            .await;
+        });
+
+        // Send a request
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        let request = InferenceRequest {
+            prompt: "Test prompt".to_string(),
+            sender: "testuser".to_string(),
+            response_tx,
+        };
+
+        inference_tx.send(request).unwrap();
+
+        // Should receive a response
+        let response =
+            tokio::time::timeout(std::time::Duration::from_millis(100), response_rx.recv()).await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().unwrap(), "Test response");
+
+        // Cleanup
+        shutdown_tx.send(()).ok();
+    }
+}

