@@ -1,29 +1,32 @@
-FROM rust:1.88 as build
+# Build stage
+FROM python:3.13-slim as builder
 
-# create a new empty shell project
-RUN USER=root cargo new --bin brok
-WORKDIR /brok
+# Set working directory
+WORKDIR /app
 
-# copy over your manifests
-COPY ./Cargo.lock ./Cargo.lock
-COPY ./Cargo.toml ./Cargo.toml
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git \
+    && rm -rf /var/lib/apt/lists/*
 
-# this build step will cache your dependencies
-RUN cargo build --release
-RUN rm src/*.rs
+# Copy source code for installation
+COPY pyproject.toml .
+COPY brok/ ./brok/
 
-# copy your source tree
-COPY ./src ./src
+# Install the package
+RUN pip install --no-cache-dir .
 
-# build for release
-RUN rm ./target/release/deps/brok*
-RUN cargo build --release
+# Runtime stage using distroless
+FROM python:3.13-slim as runtime
 
-# our final base
-FROM gcr.io/distroless/cc AS runtime
+# Copy the installed packages from builder stage
+COPY --from=builder /usr/local /usr/local
 
-# copy the build artifact from the build stage
-COPY --from=build /brok/target/release/brok .
+# Set working directory
+WORKDIR /app
 
-# set the startup command to run your binary
-ENTRYPOINT ["/brok"]
+# Make sure scripts in .local are usable and add to Python path
+ENV PATH=/usr/local/bin:$PATH
+
+# Default entrypoint uses the brok console script installed by pip
+ENTRYPOINT ["brok"] 
