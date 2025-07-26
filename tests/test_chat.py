@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from brok.chat import (
     ChatClient,
+    ContextMessage,
     ProcessedMessage,
     create_default_filters,
     is_mention,
@@ -563,8 +565,7 @@ class TestChatClient:
     @pytest.mark.asyncio
     async def test_enhanced_context_feature_flag(self) -> None:
         """Test that enhanced context feature flag works correctly (KEP-001 Increment A)."""
-        from brok.chat import ChatClient, create_default_filters, ContextMessage
-        
+
         # Test enhanced context enabled
         enhanced_client = ChatClient(
             response_filters=create_default_filters(["!bot", "!test"]),
@@ -572,39 +573,43 @@ class TestChatClient:
             enhanced_context=True,
             include_bot_responses=True,
         )
-        
+
         # Add messages
         await enhanced_client.add_message_to_context("Hello", "user1", is_bot=False)
         await enhanced_client.add_message_to_context("Hi back", "brok", is_bot=True)
-        await enhanced_client.add_message_to_context("How are you?", "user1", is_bot=False)
-        
+        await enhanced_client.add_message_to_context(
+            "How are you?", "user1", is_bot=False
+        )
+
         # Check that structured storage is used
         assert len(enhanced_client._context_messages_structured) == 3
         assert len(enhanced_client._context_messages_legacy) == 0
-        
+
         # Check that context output is correctly formatted
         context = enhanced_client.get_context()
         assert context is not None
         assert "user1: Hello" in context
         assert "brok: Hi back" in context
         assert "user1: How are you?" in context
-        
+
         # Test legacy context (enhanced_context=False)
         legacy_client = ChatClient(
             response_filters=create_default_filters(["!bot", "!test"]),
             context_window_size=3,
             enhanced_context=False,
         )
-        
+
         # Add same messages
         await legacy_client.add_message_to_context("Hello", "user1", is_bot=False)
         await legacy_client.add_message_to_context("Hi back", "brok", is_bot=True)
-        await legacy_client.add_message_to_context("How are you?", "user1", is_bot=False)
-        
+        await legacy_client.add_message_to_context(
+            "How are you?", "user1", is_bot=False
+        )
+
         # Check that legacy storage is used
         assert len(legacy_client._context_messages_structured) == 0
         assert len(legacy_client._context_messages_legacy) == 3
-        
+
         # Check that context output is identical (backward compatibility)
         legacy_context = legacy_client.get_context()
         assert legacy_context is not None
@@ -615,8 +620,7 @@ class TestChatClient:
     @pytest.mark.asyncio
     async def test_enhanced_context_include_bot_responses_setting(self) -> None:
         """Test include_bot_responses setting in enhanced context mode (KEP-001)."""
-        from brok.chat import ChatClient, create_default_filters
-        
+
         # Test with include_bot_responses=False
         client = ChatClient(
             response_filters=create_default_filters(["!bot", "!test"]),
@@ -624,22 +628,219 @@ class TestChatClient:
             enhanced_context=True,
             include_bot_responses=False,
         )
-        
+
         # Add user and bot messages
         await client.add_message_to_context("Hello", "user1", is_bot=False)
         await client.add_message_to_context("Hi there!", "brok", is_bot=True)
         await client.add_message_to_context("How are you?", "user1", is_bot=False)
         await client.add_message_to_context("I'm doing well!", "brok", is_bot=True)
-        
+
         # All messages should be stored
         assert len(client._context_messages_structured) == 4
-        
+
         # But bot messages should be filtered out of context output
         context = client.get_context()
         assert context is not None
         assert "user1: Hello" in context
         assert "user1: How are you?" in context
         assert "brok:" not in context
+
+    @pytest.mark.asyncio
+    async def test_mention_aware_context_prioritization(self) -> None:
+        """Test KEP-001 Increment B: mention-aware context prioritization."""
+        # Create client with enhanced context and mention prioritization enabled
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=10,
+            enhanced_context=True,
+            prioritize_mentions=True,
+        )
+
+        # Add messages: user1 messages, bot mentions, user2 messages
+        await client.add_message_to_context("hello everyone", "user1")
+        await client.add_message_to_context("@brok what's the weather?", "user2")
+        await client.add_message_to_context("It's sunny!", "brok", is_bot=True)
+        await client.add_message_to_context("thanks brok!", "user2")
+        await client.add_message_to_context("how are you doing?", "user1")
+
+        # Get context with user2 as current sender (who mentioned bot)
+        context = client.get_context(current_sender="user2")
+
+        assert context is not None
+        lines = context.split("\n")
+
+        # Should prioritize user2's messages first (current sender)
+        assert "user2:" in lines[0]  # user2's latest message first
+        assert "user2:" in lines[1]  # user2's mention second
+
+        # Verify bot messages are marked with emoji
+        bot_lines = [line for line in lines if line.startswith("🤖")]
+        assert len(bot_lines) == 1
+        assert "🤖 brok: It's sunny!" in bot_lines[0]
+
+    @pytest.mark.asyncio
+    async def test_token_based_context_limiting(self) -> None:
+        """Test KEP-001 Increment B: token-based context limiting."""
+        # Create client with small token limit for testing
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=10,
+            enhanced_context=True,
+            max_context_tokens=20,  # Very small limit for testing
+        )
+
+        # Add messages that would exceed token limit
+        await client.add_message_to_context(
+            "This is a very long message that should consume many tokens", "user1"
+        )
+        await client.add_message_to_context(
+            "Another long message that would push us over the limit", "user2"
+        )
+        await client.add_message_to_context("And yet another message", "user3")
+        await client.add_message_to_context("Final message", "user4")
+
+        context = client.get_context()
+
+        assert context is not None
+        # Should be truncated due to token limit
+        lines = context.split("\n")
+        assert len(lines) < 4  # Not all messages should be included
+
+    @pytest.mark.asyncio
+    async def test_enhanced_context_without_mention_prioritization(self) -> None:
+        """Test enhanced context with mention prioritization disabled."""
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=5,
+            enhanced_context=True,
+            prioritize_mentions=False,  # Disabled
+        )
+
+        await client.add_message_to_context("first message", "user1")
+        await client.add_message_to_context("@brok second message", "user2")
+        await client.add_message_to_context("third message", "user1")
+
+        # Should use chronological order (most recent first) when prioritization disabled
+        context = client.get_context(current_sender="user2")
+
+        assert context is not None
+        lines = context.split("\n")
+
+        # Should be in reverse chronological order
+        assert "user1: third message" in lines[0]
+        assert "user2: @brok second message" in lines[1]
+        assert "user1: first message" in lines[2]
+
+    @pytest.mark.asyncio
+    async def test_enhanced_context_bot_response_filtering(self) -> None:
+        """Test enhanced context with bot response filtering."""
+        # Test with bot responses excluded
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=5,
+            enhanced_context=True,
+            include_bot_responses=False,
+        )
+
+        await client.add_message_to_context("user message", "user1")
+        await client.add_message_to_context("bot response", "brok", is_bot=True)
+        await client.add_message_to_context("another user message", "user2")
+
+        context = client.get_context()
+        assert context is not None
+
+        # Should not contain bot responses
+        assert "bot response" not in context
+        assert "user message" in context
+        assert "another user message" in context
+
+        # Test with bot responses included
+        client._include_bot_responses = True
+        context = client.get_context()
+        assert context is not None
+
+        # Should contain bot responses with emoji prefix
+        assert "🤖 brok: bot response" in context
+
+    @pytest.mark.asyncio
+    async def test_enhanced_context_empty_after_filtering(self) -> None:
+        """Test enhanced context returns None when empty after filtering."""
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=5,
+            enhanced_context=True,
+            include_bot_responses=False,  # Exclude bot responses
+        )
+
+        # Add only bot messages
+        await client.add_message_to_context("bot message 1", "brok", is_bot=True)
+        await client.add_message_to_context("bot message 2", "brok", is_bot=True)
+
+        context = client.get_context()
+        # Should return None since all messages are filtered out
+        assert context is None
+
+    @pytest.mark.asyncio
+    async def test_mention_prioritization_helper_method(self) -> None:
+        """Test _prioritize_context_messages helper method directly."""
+        client = ChatClient(
+            response_filters=[],
+            enhanced_context=True,
+            bot_name="testbot",
+        )
+
+        # Create test messages
+        messages = [
+            ContextMessage("hello", "user1", datetime.now(), False),
+            ContextMessage("@testbot help me", "user2", datetime.now(), False),
+            ContextMessage("random message", "user3", datetime.now(), False),
+            ContextMessage("another message", "user2", datetime.now(), False),
+            ContextMessage("testbot, what time is it?", "user1", datetime.now(), False),
+        ]
+
+        # Prioritize with user2 as current sender
+        prioritized = client._prioritize_context_messages(messages, "user2")
+
+        # user2 messages should come first
+        assert prioritized[0].sender == "user2"
+        assert prioritized[1].sender == "user2"
+
+        # Then mentions of testbot
+        mention_indices = [
+            i
+            for i, msg in enumerate(prioritized)
+            if "testbot" in msg.content.lower() or "@testbot" in msg.content.lower()
+        ]
+        assert len(mention_indices) > 0
+
+    @pytest.mark.asyncio
+    async def test_token_limit_helper_method(self) -> None:
+        """Test _apply_token_limit helper method directly."""
+        client = ChatClient(
+            response_filters=[],
+            enhanced_context=True,
+            max_context_tokens=10,  # Very small limit for testing
+        )
+
+        # Create messages with known content lengths
+        messages = [
+            ContextMessage("short", "user1", datetime.now(), False),  # ~10 chars
+            ContextMessage(
+                "medium length message", "user2", datetime.now(), False
+            ),  # ~25 chars
+            ContextMessage(
+                "this is a very long message that exceeds limits",
+                "user3",
+                datetime.now(),
+                False,
+            ),  # ~50 chars
+        ]
+
+        limited = client._apply_token_limit(messages)
+
+        # Should include some but not all messages due to token limit
+        assert len(limited) < len(messages)
+        assert len(limited) > 0
 
 
 class TestDefaultFilters:
