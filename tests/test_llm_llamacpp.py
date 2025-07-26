@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 import aiohttp
 import pytest
@@ -10,6 +10,19 @@ import pytest
 from brok.exceptions import LLMConnectionError, LLMGenerationError, LLMTimeoutError
 from brok.llm.base import LLMConfig
 from brok.llm.llamacpp import LlamaCppProvider
+
+
+class AsyncContextManagerMock:
+    """Helper class to create proper async context manager mocks for aiohttp responses."""
+
+    def __init__(self, mock_response):
+        self.mock_response = mock_response
+
+    async def __aenter__(self):
+        return self.mock_response
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return None
 
 
 @pytest.fixture
@@ -42,7 +55,8 @@ class TestLlamaCppProvider:
     ):
         """Test successful response generation."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(
@@ -53,9 +67,7 @@ class TestLlamaCppProvider:
         )
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         llamacpp_provider._session = mock_session
 
         # Act
@@ -77,7 +89,8 @@ class TestLlamaCppProvider:
     async def test_generate_with_context(self, llamacpp_provider: LlamaCppProvider):
         """Test generation with conversation context."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(
@@ -85,9 +98,7 @@ class TestLlamaCppProvider:
         )
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         llamacpp_provider._session = mock_session
 
         context = "user1: Previous message\nuser2: Another message"
@@ -111,15 +122,14 @@ class TestLlamaCppProvider:
     async def test_generate_empty_response(self, llamacpp_provider: LlamaCppProvider):
         """Test handling of empty response from LlamaCpp."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={"content": ""})
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         llamacpp_provider._session = mock_session
 
         # Act
@@ -137,15 +147,14 @@ class TestLlamaCppProvider:
     ):
         """Test handling of API error from LlamaCpp."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={"error": "Model not found"})
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         llamacpp_provider._session = mock_session
 
         # Act & Assert
@@ -157,15 +166,14 @@ class TestLlamaCppProvider:
     async def test_generate_http_error(self, llamacpp_provider: LlamaCppProvider):
         """Test handling of HTTP error responses."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 500
         mock_response.text = AsyncMock(return_value="Internal Server Error")
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         llamacpp_provider._session = mock_session
 
         # Act & Assert
@@ -177,7 +185,8 @@ class TestLlamaCppProvider:
     async def test_generate_connection_error(self, llamacpp_provider: LlamaCppProvider):
         """Test handling of connection errors."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.post.side_effect = aiohttp.ClientError("Connection failed")
         llamacpp_provider._session = mock_session
 
@@ -190,7 +199,8 @@ class TestLlamaCppProvider:
     async def test_generate_timeout_error(self, llamacpp_provider: LlamaCppProvider):
         """Test handling of timeout errors."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.post.side_effect = aiohttp.ServerTimeoutError("Request timed out")
         llamacpp_provider._session = mock_session
 
@@ -200,20 +210,23 @@ class TestLlamaCppProvider:
                 pass
 
     @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession")
     async def test_health_check_success_via_health_endpoint(
-        self, llamacpp_provider: LlamaCppProvider
+        self, mock_session_class, llamacpp_provider: LlamaCppProvider
     ):
         """Test successful health check via /health endpoint."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = Mock()
+        mock_session.closed = False  # Make it appear as not closed
+        mock_session_class.return_value = mock_session
+
         mock_response = AsyncMock()
         mock_response.status = 200
 
-        # Set up the context manager properly
-        mock_session.get.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
-        llamacpp_provider._session = mock_session
+        # Set up the context managers properly for both get and post
+        mock_session.get = Mock(return_value=AsyncContextManagerMock(mock_response))
+        mock_session.post = Mock(return_value=AsyncContextManagerMock(mock_response))
+        mock_session.close = AsyncMock()  # Add async close method
 
         # Act
         result = await llamacpp_provider.health_check()
@@ -223,26 +236,28 @@ class TestLlamaCppProvider:
         mock_session.get.assert_called_once_with("http://localhost:8080/health")
 
     @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession")
     async def test_health_check_success_via_completion_fallback(
-        self, llamacpp_provider: LlamaCppProvider
+        self, mock_session_class, llamacpp_provider: LlamaCppProvider
     ):
         """Test successful health check via /completion fallback."""
         # Arrange
-        mock_session = AsyncMock()
-
-        # Mock /health endpoint to fail (404)
-        mock_health_response = AsyncMock()
-        mock_health_response.status = 404
+        mock_session = Mock()
+        mock_session.closed = False  # Make it appear as not closed
+        mock_session_class.return_value = mock_session
 
         # Mock /completion endpoint to succeed
         mock_completion_response = AsyncMock()
         mock_completion_response.status = 200
 
-        mock_session.get.side_effect = Exception("Health endpoint not available")
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_completion_response)
+        # Set up the context managers properly
+        # Make the /health endpoint fail
+        mock_session.get = Mock(side_effect=Exception("Health endpoint not available"))
+        # Make the /completion endpoint succeed
+        mock_session.post = Mock(
+            return_value=AsyncContextManagerMock(mock_completion_response)
         )
-        llamacpp_provider._session = mock_session
+        mock_session.close = AsyncMock()  # Add async close method
 
         # Act
         result = await llamacpp_provider.health_check()
@@ -252,24 +267,27 @@ class TestLlamaCppProvider:
         mock_session.post.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_health_check_failure(self, llamacpp_provider: LlamaCppProvider):
+    @patch("aiohttp.ClientSession")
+    async def test_health_check_failure(
+        self, mock_session_class, llamacpp_provider: LlamaCppProvider
+    ):
         """Test failed health check."""
         # Arrange
         mock_session = AsyncMock()
+        mock_session.closed = False  # Make it appear as not closed
+        mock_session_class.return_value = mock_session
         mock_response = AsyncMock()
         mock_response.status = 500
 
         # Set up the context manager properly
-        mock_session.get.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
-        llamacpp_provider._session = mock_session
+        mock_session.get.return_value = AsyncContextManagerMock(mock_response)
 
-        # Act
-        result = await llamacpp_provider.health_check()
+        # Mock post for fallback to also fail
+        mock_session.post.side_effect = Exception("Connection failed")
 
-        # Assert
-        assert result is False
+        # Act & Assert
+        with pytest.raises(LLMConnectionError, match="LlamaCpp health check failed"):
+            await llamacpp_provider.health_check()
 
     @pytest.mark.asyncio
     async def test_health_check_connection_error(
@@ -277,7 +295,8 @@ class TestLlamaCppProvider:
     ):
         """Test health check with connection error."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.get.side_effect = aiohttp.ClientError("Connection failed")
         mock_session.post.side_effect = aiohttp.ClientError("Connection failed")
         llamacpp_provider._session = mock_session
@@ -292,7 +311,9 @@ class TestLlamaCppProvider:
         prompt = llamacpp_provider._build_prompt("Hello", None)
 
         # Assert
-        assert prompt == "User: Hello\nAssistant:"
+        assert "User: Hello" in prompt
+        assert "Assistant:" in prompt
+        assert "You are brok" in prompt  # Verify system prompt is included
 
     def test_build_prompt_with_context(self, llamacpp_provider: LlamaCppProvider):
         """Test prompt building with context."""
@@ -313,7 +334,8 @@ class TestLlamaCppProvider:
     async def test_close_session(self, llamacpp_provider: LlamaCppProvider):
         """Test closing HTTP session."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.closed = False
         llamacpp_provider._session = mock_session
 
@@ -329,7 +351,8 @@ class TestLlamaCppProvider:
     ):
         """Test closing already closed session."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.closed = True
         llamacpp_provider._session = mock_session
 

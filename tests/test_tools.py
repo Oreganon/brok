@@ -460,7 +460,7 @@ class TestDateTimeTool:
         # Should either include UTC or gracefully fallback to system
         assert result.metadata["timezone"] in ("UTC", "system")
 
-        # Test with invalid timezone (should fallback to system)
+        # Test with invalid timezone (should return error)
         result = await tool.execute(timezone="Invalid/Timezone")
-        assert result.success
-        assert result.metadata["timezone"] == "system"
+        assert not result.success
+        assert "Invalid timezone" in result.error

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 import aiohttp
 import pytest
@@ -10,6 +10,19 @@ import pytest
 from brok.exceptions import LLMConnectionError, LLMGenerationError, LLMTimeoutError
 from brok.llm.base import LLMConfig
 from brok.llm.ollama import OllamaProvider
+
+
+class AsyncContextManagerMock:
+    """Helper class to create proper async context manager mocks for aiohttp responses."""
+
+    def __init__(self, mock_response):
+        self.mock_response = mock_response
+
+    async def __aenter__(self):
+        return self.mock_response
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return None
 
 
 @pytest.fixture
@@ -40,7 +53,8 @@ class TestOllamaProvider:
     async def test_generate_successful_response(self, ollama_provider: OllamaProvider):
         """Test successful response generation."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(
@@ -51,9 +65,7 @@ class TestOllamaProvider:
         )
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         ollama_provider._session = mock_session
 
         # Act
@@ -75,7 +87,8 @@ class TestOllamaProvider:
     async def test_generate_with_context(self, ollama_provider: OllamaProvider):
         """Test generation with conversation context."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(
@@ -83,9 +96,7 @@ class TestOllamaProvider:
         )
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         ollama_provider._session = mock_session
 
         context = "user1: Previous message\nuser2: Another message"
@@ -109,15 +120,14 @@ class TestOllamaProvider:
     async def test_generate_empty_response(self, ollama_provider: OllamaProvider):
         """Test handling of empty response from Ollama."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={"response": ""})
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         ollama_provider._session = mock_session
 
         # Act
@@ -133,15 +143,14 @@ class TestOllamaProvider:
     async def test_generate_api_error_response(self, ollama_provider: OllamaProvider):
         """Test handling of API error from Ollama."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={"error": "Model not found"})
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         ollama_provider._session = mock_session
 
         # Act & Assert
@@ -153,15 +162,14 @@ class TestOllamaProvider:
     async def test_generate_http_error(self, ollama_provider: OllamaProvider):
         """Test handling of HTTP error responses."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_response = AsyncMock()
         mock_response.status = 500
         mock_response.text = AsyncMock(return_value="Internal Server Error")
 
         # Set up the context manager properly
-        mock_session.post.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
+        mock_session.post.return_value = AsyncContextManagerMock(mock_response)
         ollama_provider._session = mock_session
 
         # Act & Assert
@@ -173,7 +181,8 @@ class TestOllamaProvider:
     async def test_generate_connection_error(self, ollama_provider: OllamaProvider):
         """Test handling of connection errors."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.post.side_effect = aiohttp.ClientError("Connection failed")
         ollama_provider._session = mock_session
 
@@ -186,7 +195,8 @@ class TestOllamaProvider:
     async def test_generate_timeout_error(self, ollama_provider: OllamaProvider):
         """Test handling of timeout errors."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.post.side_effect = aiohttp.ServerTimeoutError("Request timed out")
         ollama_provider._session = mock_session
 
@@ -196,18 +206,22 @@ class TestOllamaProvider:
                 pass
 
     @pytest.mark.asyncio
-    async def test_health_check_success(self, ollama_provider: OllamaProvider):
+    @patch("aiohttp.ClientSession")
+    async def test_health_check_success(
+        self, mock_session_class, ollama_provider: OllamaProvider
+    ):
         """Test successful health check."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = Mock()
+        mock_session.closed = False  # Make it appear as not closed
+        mock_session_class.return_value = mock_session
+
         mock_response = AsyncMock()
         mock_response.status = 200
 
         # Set up the context manager properly
-        mock_session.get.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
-        ollama_provider._session = mock_session
+        mock_session.get = Mock(return_value=AsyncContextManagerMock(mock_response))
+        mock_session.close = AsyncMock()  # Add async close method
 
         # Act
         result = await ollama_provider.health_check()
@@ -217,30 +231,31 @@ class TestOllamaProvider:
         mock_session.get.assert_called_once_with("http://localhost:11434/api/tags")
 
     @pytest.mark.asyncio
-    async def test_health_check_failure(self, ollama_provider: OllamaProvider):
+    @patch("aiohttp.ClientSession")
+    async def test_health_check_failure(
+        self, mock_session_class, ollama_provider: OllamaProvider
+    ):
         """Test failed health check."""
         # Arrange
         mock_session = AsyncMock()
+        mock_session.closed = False  # Make it appear as not closed
+        mock_session_class.return_value = mock_session
         mock_response = AsyncMock()
         mock_response.status = 500
 
         # Set up the context manager properly
-        mock_session.get.return_value = AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_response)
-        )
-        ollama_provider._session = mock_session
+        mock_session.get.return_value = AsyncContextManagerMock(mock_response)
 
-        # Act
-        result = await ollama_provider.health_check()
-
-        # Assert
-        assert result is False
+        # Act & Assert
+        with pytest.raises(LLMConnectionError, match="Ollama health check failed"):
+            await ollama_provider.health_check()
 
     @pytest.mark.asyncio
     async def test_health_check_connection_error(self, ollama_provider: OllamaProvider):
         """Test health check with connection error."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.get.side_effect = aiohttp.ClientError("Connection failed")
         ollama_provider._session = mock_session
 
@@ -254,7 +269,9 @@ class TestOllamaProvider:
         prompt = ollama_provider._build_prompt("Hello", None)
 
         # Assert
-        assert prompt == "User: Hello\nAssistant:"
+        assert "User: Hello" in prompt
+        assert "Assistant:" in prompt
+        assert "You are brok" in prompt  # Verify system prompt is included
 
     def test_build_prompt_with_context(self, ollama_provider: OllamaProvider):
         """Test prompt building with context."""
@@ -275,7 +292,8 @@ class TestOllamaProvider:
     async def test_close_session(self, ollama_provider: OllamaProvider):
         """Test closing HTTP session."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.closed = False
         ollama_provider._session = mock_session
 
@@ -289,7 +307,8 @@ class TestOllamaProvider:
     async def test_close_already_closed_session(self, ollama_provider: OllamaProvider):
         """Test closing already closed session."""
         # Arrange
-        mock_session = AsyncMock()
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.closed = False  # Make it appear as not closed
         mock_session.closed = True
         ollama_provider._session = mock_session
 

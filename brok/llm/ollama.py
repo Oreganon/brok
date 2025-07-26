@@ -141,11 +141,11 @@ class OllamaProvider(LLMProvider):
                 logger.debug(f"Generated response: {len(response_text)} characters")
                 yield response_text
 
-        except aiohttp.ClientError as e:
-            raise LLMConnectionError(f"Failed to connect to Ollama: {e}") from e
         # Handle timeout errors from aiohttp as well as generic asyncio timeouts
         except (TimeoutError, aiohttp.ServerTimeoutError) as e:
             raise LLMTimeoutError(f"Ollama request timed out: {e}") from e
+        except aiohttp.ClientError as e:
+            raise LLMConnectionError(f"Failed to connect to Ollama: {e}") from e
         except Exception as e:
             if isinstance(e, LLMConnectionError | LLMTimeoutError | LLMGenerationError):
                 raise

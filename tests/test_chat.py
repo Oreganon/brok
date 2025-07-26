@@ -584,7 +584,7 @@ class TestChatClient:
 
         # Check that structured storage is used
         assert len(enhanced_client._context_messages_structured) == 3
-        assert not hasattr(enhanced_client, '_context_messages_legacy')
+        assert not hasattr(enhanced_client, "_context_messages_legacy")
 
         # Check that context output is correctly formatted
         context = enhanced_client.get_context()
@@ -608,7 +608,7 @@ class TestChatClient:
         )
 
         # Check that legacy storage is used
-        assert not hasattr(legacy_client, '_context_messages_structured')
+        assert not hasattr(legacy_client, "_context_messages_structured")
         assert len(legacy_client._context_messages_legacy) == 3
 
         # Check that context output is identical (backward compatibility)

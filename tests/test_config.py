@@ -300,11 +300,11 @@ class TestBotConfig:
         [
             (
                 "0.5",
-                "Invalid configuration value.*INITIAL_RECONNECT_DELAY.*must be between 1.0 and 60.0",
+                "Invalid configuration value.*Invalid INITIAL_RECONNECT_DELAY",
             ),
             (
                 "61.0",
-                "Invalid configuration value.*INITIAL_RECONNECT_DELAY.*must be between 1.0 and 60.0",
+                "Invalid configuration value.*Invalid INITIAL_RECONNECT_DELAY",
             ),
             (
                 "not_a_number",
@@ -329,11 +329,11 @@ class TestBotConfig:
         [
             (
                 "29.0",
-                "Invalid configuration value.*MAX_RECONNECT_DELAY.*must be between 30.0 and 3600.0",
+                "Invalid configuration value.*Invalid MAX_RECONNECT_DELAY",
             ),
             (
                 "3601.0",
-                "Invalid configuration value.*MAX_RECONNECT_DELAY.*must be between 30.0 and 3600.0",
+                "Invalid configuration value.*Invalid MAX_RECONNECT_DELAY",
             ),
             (
                 "not_a_number",

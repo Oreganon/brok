@@ -142,11 +142,11 @@ class LlamaCppProvider(LLMProvider):
                 logger.debug(f"Generated response: {len(response_text)} characters")
                 yield response_text
 
-        except aiohttp.ClientError as e:
-            raise LLMConnectionError(f"Failed to connect to LlamaCpp: {e}") from e
         # Handle timeout errors from aiohttp as well as generic asyncio timeouts
         except (TimeoutError, aiohttp.ServerTimeoutError) as e:
             raise LLMTimeoutError(f"LlamaCpp request timed out: {e}") from e
+        except aiohttp.ClientError as e:
+            raise LLMConnectionError(f"Failed to connect to LlamaCpp: {e}") from e
         except Exception as e:
             if isinstance(e, LLMConnectionError | LLMTimeoutError | LLMGenerationError):
                 raise
