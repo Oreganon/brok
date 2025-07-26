@@ -13,12 +13,18 @@ class PromptTemplate:
     user_prefix: str = "User"
     assistant_prefix: str = "Assistant"
 
-    def build_prompt(self, user_input: str, context: str | None = None) -> str:
+    def build_prompt(
+        self,
+        user_input: str,
+        context: str | None = None,
+        tools_description: str | None = None,
+    ) -> str:
         """Build a complete prompt from user input and optional context.
 
         Args:
             user_input: The user's message
             context: Optional conversation context
+            tools_description: Optional description of available tools
 
         Returns:
             str: The complete formatted prompt
@@ -28,6 +34,15 @@ class PromptTemplate:
         # Add system prompt if provided
         if self.system_prompt.strip():
             parts.append(f"System: {self.system_prompt}")
+
+        # Add tools description if provided
+        if tools_description and tools_description.strip():
+            parts.append(f"Tools: {tools_description}")
+            parts.append(
+                "You can use tools by responding in this format: "
+                '{"tool": "tool_name", "params": {"param": "value"}} '
+                "OR by using natural language like 'Let me check the weather in London'"
+            )
 
         # Add context if provided
         if context and context.strip():

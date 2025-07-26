@@ -51,6 +51,9 @@ class BotConfig:
         10  # How often to check connection status (seconds)
     )
 
+    # Tools configuration
+    enable_tools: bool = True  # Whether to enable tool calling
+
     # Logging
     log_level: str = "INFO"
     log_chat_messages: bool = False  # Opt-in for privacy
@@ -179,6 +182,7 @@ class BotConfig:
                 connection_check_interval=connection_check_interval,
                 log_level=log_level,
                 log_chat_messages=os.getenv("LOG_CHAT", "false").lower() == "true",
+                enable_tools=os.getenv("ENABLE_TOOLS", "true").lower() == "true",
             )
         except ValueError as e:
             raise ConfigurationError(f"Invalid configuration value: {e}") from e
