@@ -143,20 +143,80 @@ class ChatBot:
         """Monitor chat connection and handle reconnection if needed.
 
         Runs continuously to ensure chat connection remains active.
-        Currently just monitors - reconnection logic can be added later.
+        Implements exponential backoff for reconnection attempts to avoid
+        overwhelming the chat server during outages.
+
+        The monitor will:
+        1. Check connection status every 10 seconds
+        2. Attempt reconnection with exponential backoff if disconnected
+        3. Log all connection events for debugging
+        4. Update error statistics for monitoring
         """
+        reconnect_delay = self._config.initial_reconnect_delay
+        max_reconnect_delay = self._config.max_reconnect_delay
+        consecutive_failures = 0
+        max_consecutive_failures = self._config.max_reconnect_attempts
+
         while not self._shutdown_event.is_set():
             try:
                 if not self._chat_client.is_connected():
-                    logger.warning("Chat connection lost!")
+                    logger.warning(
+                        f"Chat connection lost! Consecutive failures: {consecutive_failures}"
+                    )
                     self._stats.errors_count += 1
-                    # For now, just log - reconnection logic can be added later
 
-                await asyncio.sleep(10)  # Check every 10 seconds
+                    # Check if we should give up
+                    if consecutive_failures >= max_consecutive_failures:
+                        logger.error(
+                            f"Chat reconnection failed {max_consecutive_failures} times. "
+                            "Giving up on automatic reconnection."
+                        )
+                        self._shutdown_event.set()
+                        break
+
+                    # Attempt reconnection with exponential backoff
+                    logger.info(
+                        f"Attempting to reconnect to chat in {reconnect_delay:.1f} seconds..."
+                    )
+                    await asyncio.sleep(reconnect_delay)
+
+                    if self._shutdown_event.is_set():
+                        break
+
+                    try:
+                        logger.info("Attempting chat reconnection...")
+                        await self._chat_client.connect(
+                            jwt_token=self._config.jwt_token,
+                            environment=self._config.chat_environment,
+                        )
+
+                        logger.info("✅ Chat reconnection successful!")
+                        # Reset backoff on successful connection
+                        reconnect_delay = self._config.initial_reconnect_delay
+                        consecutive_failures = 0
+
+                    except Exception as e:
+                        consecutive_failures += 1
+                        logger.exception(f"Chat reconnection failed: {e}")
+                        self._stats.errors_count += 1
+
+                        # Increase delay with exponential backoff
+                        reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+
+                else:
+                    # Connection is healthy - reset failure counter
+                    if consecutive_failures > 0:
+                        logger.debug("Chat connection healthy - resetting failure counter")
+                        consecutive_failures = 0
+                        reconnect_delay = self._config.initial_reconnect_delay
+
+                # Check again based on configured interval
+                await asyncio.sleep(self._config.connection_check_interval)
 
             except Exception:
                 logger.exception("Connection monitor error")
-                await asyncio.sleep(5)
+                self._stats.errors_count += 1
+                await asyncio.sleep(5)  # Brief pause before retrying
 
     async def _llm_worker(self, worker_id: int) -> None:
         """Worker to process LLM requests from queue.

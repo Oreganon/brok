@@ -29,6 +29,10 @@ class TestBotConfig:
         assert config.respond_to_keywords == ["!bot", "!ask"]
         assert config.ignore_users == []
         assert config.context_window_size == 10
+        assert config.max_reconnect_attempts == 10
+        assert config.initial_reconnect_delay == 5.0
+        assert config.max_reconnect_delay == 300.0
+        assert config.connection_check_interval == 10
         assert config.log_level == "INFO"
         assert config.log_chat_messages is False
 
@@ -47,6 +51,10 @@ class TestBotConfig:
             "LLM_MAX_CONCURRENT",
             "BOT_KEYWORDS",
             "CONTEXT_WINDOW_SIZE",
+            "MAX_RECONNECT_ATTEMPTS",
+            "INITIAL_RECONNECT_DELAY", 
+            "MAX_RECONNECT_DELAY",
+            "CONNECTION_CHECK_INTERVAL",
             "LOG_LEVEL",
             "LOG_CHAT",
         ]:
@@ -222,3 +230,95 @@ class TestBotConfig:
 
         # Assert
         assert config.log_chat_messages == expected
+
+    def test_default_connection_settings(self):
+        """Test that default connection settings are reasonable."""
+        # Arrange & Act
+        config = BotConfig()
+
+        # Assert
+        assert config.max_reconnect_attempts == 10
+        assert config.initial_reconnect_delay == 5.0
+        assert config.max_reconnect_delay == 300.0
+        assert config.connection_check_interval == 10
+        
+        # Validate relationships
+        assert config.max_reconnect_delay >= config.initial_reconnect_delay
+        assert config.max_reconnect_attempts > 0
+        assert config.connection_check_interval > 0
+
+    def test_from_env_with_custom_connection_settings(self, monkeypatch):
+        """Test loading custom connection settings from environment."""
+        # Arrange
+        monkeypatch.setenv("MAX_RECONNECT_ATTEMPTS", "5")
+        monkeypatch.setenv("INITIAL_RECONNECT_DELAY", "10.0")
+        monkeypatch.setenv("MAX_RECONNECT_DELAY", "600.0")
+        monkeypatch.setenv("CONNECTION_CHECK_INTERVAL", "15")
+
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.max_reconnect_attempts == 5
+        assert config.initial_reconnect_delay == 10.0
+        assert config.max_reconnect_delay == 600.0
+        assert config.connection_check_interval == 15
+
+    @pytest.mark.parametrize(
+        "env_value,expected_error",
+        [
+            ("0", "Invalid configuration value.*MAX_RECONNECT_ATTEMPTS.*must be positive"),
+            ("-1", "Invalid configuration value.*MAX_RECONNECT_ATTEMPTS.*must be positive"),
+            ("not_a_number", "Invalid configuration value.*Invalid MAX_RECONNECT_ATTEMPTS"),
+            ("", "Invalid configuration value.*Invalid MAX_RECONNECT_ATTEMPTS"),
+        ],
+    )
+    def test_from_env_invalid_max_reconnect_attempts(
+        self, monkeypatch, env_value, expected_error
+    ):
+        """Test validation of MAX_RECONNECT_ATTEMPTS environment variable."""
+        # Arrange
+        monkeypatch.setenv("MAX_RECONNECT_ATTEMPTS", env_value)
+
+        # Act & Assert
+        with pytest.raises(ConfigurationError, match=expected_error):
+            BotConfig.from_env()
+
+    @pytest.mark.parametrize(
+        "env_value,expected_error",
+        [
+            ("0.5", "Invalid configuration value.*INITIAL_RECONNECT_DELAY.*must be between 1.0 and 60.0"),
+            ("61.0", "Invalid configuration value.*INITIAL_RECONNECT_DELAY.*must be between 1.0 and 60.0"),
+            ("not_a_number", "Invalid configuration value.*Invalid INITIAL_RECONNECT_DELAY"),
+            ("", "Invalid configuration value.*Invalid INITIAL_RECONNECT_DELAY"),
+        ],
+    )
+    def test_from_env_invalid_initial_reconnect_delay(
+        self, monkeypatch, env_value, expected_error
+    ):
+        """Test validation of INITIAL_RECONNECT_DELAY environment variable."""
+        # Arrange
+        monkeypatch.setenv("INITIAL_RECONNECT_DELAY", env_value)
+
+        # Act & Assert
+        with pytest.raises(ConfigurationError, match=expected_error):
+            BotConfig.from_env()
+
+    @pytest.mark.parametrize(
+        "env_value,expected_error",
+        [
+            ("29.0", "Invalid configuration value.*MAX_RECONNECT_DELAY.*must be between 30.0 and 3600.0"),
+            ("3601.0", "Invalid configuration value.*MAX_RECONNECT_DELAY.*must be between 30.0 and 3600.0"),
+            ("not_a_number", "Invalid configuration value.*Invalid MAX_RECONNECT_DELAY"),
+        ],
+    )
+    def test_from_env_invalid_max_reconnect_delay(
+        self, monkeypatch, env_value, expected_error
+    ):
+        """Test validation of MAX_RECONNECT_DELAY environment variable."""
+        # Arrange
+        monkeypatch.setenv("MAX_RECONNECT_DELAY", env_value)
+
+        # Act & Assert
+        with pytest.raises(ConfigurationError, match=expected_error):
+            BotConfig.from_env()

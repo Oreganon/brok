@@ -33,6 +33,12 @@ class BotConfig:
     ignore_users: list[str] = field(default_factory=list)
     context_window_size: int = 10
 
+    # Connection settings
+    max_reconnect_attempts: int = 10  # Max consecutive reconnection failures before giving up
+    initial_reconnect_delay: float = 5.0  # Initial delay between reconnection attempts (seconds)
+    max_reconnect_delay: float = 300.0  # Maximum delay between reconnection attempts (seconds)
+    connection_check_interval: int = 10  # How often to check connection status (seconds)
+
     # Logging
     log_level: str = "INFO"
     log_chat_messages: bool = False  # Opt-in for privacy
@@ -59,6 +65,12 @@ class BotConfig:
             timeout_seconds = cls._parse_positive_int("LLM_TIMEOUT", "30")
             max_concurrent = cls._parse_positive_int("LLM_MAX_CONCURRENT", "2")
             context_window_size = cls._parse_positive_int("CONTEXT_WINDOW_SIZE", "10")
+            
+            # Parse connection settings
+            max_reconnect_attempts = cls._parse_positive_int("MAX_RECONNECT_ATTEMPTS", "10")
+            initial_reconnect_delay = cls._parse_float_range("INITIAL_RECONNECT_DELAY", "5.0", 1.0, 60.0)
+            max_reconnect_delay = cls._parse_float_range("MAX_RECONNECT_DELAY", "300.0", 30.0, 3600.0)
+            connection_check_interval = cls._parse_positive_int("CONNECTION_CHECK_INTERVAL", "10")
 
             # Validate environment
             chat_env = os.getenv("CHAT_ENV", "production")
@@ -115,6 +127,10 @@ class BotConfig:
                 respond_to_mentions=respond_to_mentions,
                 respond_to_commands=respond_to_commands,
                 context_window_size=context_window_size,
+                max_reconnect_attempts=max_reconnect_attempts,
+                initial_reconnect_delay=initial_reconnect_delay,
+                max_reconnect_delay=max_reconnect_delay,
+                connection_check_interval=connection_check_interval,
                 log_level=log_level,
                 log_chat_messages=os.getenv("LOG_CHAT", "false").lower() == "true",
             )
