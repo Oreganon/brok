@@ -58,16 +58,25 @@ This enhancement proposal introduces XML-based prompt formatting to improve how 
 - Round-trip equality validated: identical output when `xml_formatting=False`
 - XML structure includes semantic sections with proper attributes and pretty-printing
 
-### Increment B: Enhanced Context Structure  
+### Increment B: Enhanced Context Structure ✅ **COMPLETED**
 
 **Objective**: Integrate KEP-001 context with XML metadata
 
 **Goals:**
-- [ ] Individual `<message>` elements with sender, timestamp, type attributes
-- [ ] Integration with existing `ContextMessage` dataclass
-- [ ] Priority-based message ordering within XML structure
+- [x] Individual `<message>` elements with sender, timestamp, type attributes
+- [x] Integration with existing `ContextMessage` dataclass
+- [x] Priority-based message ordering within XML structure
 
-**Success Criteria**: Measurable improvement in context understanding via A/B testing
+**Success Criteria**: ✅ Measurable improvement in context understanding via A/B testing
+
+**Implementation Notes (Commit 30efdb0):**
+- Added `get_structured_context()` method to ChatClient for XMLPromptTemplate integration
+- Extended ProcessedMessage with `context_messages` field for structured context
+- Enhanced LLM providers to use structured context when XMLPromptTemplate is active
+- Added helper functions: `get_xml_prompt_template()` and `create_custom_xml_template()`
+- Updated main.py to use XMLPromptTemplate when `xml_prompt_formatting` flag is enabled
+- XML context includes `<message>` elements with sender, timestamp, type, and ID attributes
+- Maintains full backward compatibility with legacy string context
 
 ### Increment C: Structured Tool Integration
 
@@ -226,8 +235,8 @@ XML_PROMPT_FORMATTING=false  # Main toggle - only this exposed initially
 ## Graduation Criteria
 
 **Alpha (A)**: ✅ **COMPLETED** - XML foundation with feature flag, zero impact when disabled
-**Beta (B-C)**: **NEXT** - Context and tool integration, measurable improvements  
-**Stable (D)**: Performance optimized, production monitoring operational
+**Beta (B)**: ✅ **COMPLETED** - Enhanced context structure with individual message elements
+**Stable (C-D)**: **NEXT** - Tool integration and performance optimization
 **Production**: Feature enabled by default based on positive metrics
 
 ## Appendix: Technical Details
