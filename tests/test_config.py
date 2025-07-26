@@ -22,12 +22,14 @@ class TestBotConfig:
         assert config.llm_provider == "ollama"
         assert config.llm_model == "llama3.2:3b"
         assert config.llm_base_url == "http://localhost:11434"
-        assert config.llm_max_tokens == 150
+        assert config.llm_max_tokens == 100
         assert config.llm_temperature == 0.7
         assert config.llm_timeout_seconds == 30
         assert config.llm_max_concurrent_requests == 2
         assert config.respond_to_keywords == ["!bot", "!ask"]
         assert config.ignore_users == []
+        assert config.prompt_style == "concise"
+        assert config.custom_system_prompt is None
         assert config.context_window_size == 10
         assert config.max_reconnect_attempts == 10
         assert config.initial_reconnect_delay == 5.0
@@ -52,7 +54,7 @@ class TestBotConfig:
             "BOT_KEYWORDS",
             "CONTEXT_WINDOW_SIZE",
             "MAX_RECONNECT_ATTEMPTS",
-            "INITIAL_RECONNECT_DELAY", 
+            "INITIAL_RECONNECT_DELAY",
             "MAX_RECONNECT_DELAY",
             "CONNECTION_CHECK_INTERVAL",
             "LOG_LEVEL",
@@ -241,7 +243,7 @@ class TestBotConfig:
         assert config.initial_reconnect_delay == 5.0
         assert config.max_reconnect_delay == 300.0
         assert config.connection_check_interval == 10
-        
+
         # Validate relationships
         assert config.max_reconnect_delay >= config.initial_reconnect_delay
         assert config.max_reconnect_attempts > 0
@@ -267,9 +269,18 @@ class TestBotConfig:
     @pytest.mark.parametrize(
         "env_value,expected_error",
         [
-            ("0", "Invalid configuration value.*MAX_RECONNECT_ATTEMPTS.*must be positive"),
-            ("-1", "Invalid configuration value.*MAX_RECONNECT_ATTEMPTS.*must be positive"),
-            ("not_a_number", "Invalid configuration value.*Invalid MAX_RECONNECT_ATTEMPTS"),
+            (
+                "0",
+                "Invalid configuration value.*MAX_RECONNECT_ATTEMPTS.*must be positive",
+            ),
+            (
+                "-1",
+                "Invalid configuration value.*MAX_RECONNECT_ATTEMPTS.*must be positive",
+            ),
+            (
+                "not_a_number",
+                "Invalid configuration value.*Invalid MAX_RECONNECT_ATTEMPTS",
+            ),
             ("", "Invalid configuration value.*Invalid MAX_RECONNECT_ATTEMPTS"),
         ],
     )
@@ -287,9 +298,18 @@ class TestBotConfig:
     @pytest.mark.parametrize(
         "env_value,expected_error",
         [
-            ("0.5", "Invalid configuration value.*INITIAL_RECONNECT_DELAY.*must be between 1.0 and 60.0"),
-            ("61.0", "Invalid configuration value.*INITIAL_RECONNECT_DELAY.*must be between 1.0 and 60.0"),
-            ("not_a_number", "Invalid configuration value.*Invalid INITIAL_RECONNECT_DELAY"),
+            (
+                "0.5",
+                "Invalid configuration value.*INITIAL_RECONNECT_DELAY.*must be between 1.0 and 60.0",
+            ),
+            (
+                "61.0",
+                "Invalid configuration value.*INITIAL_RECONNECT_DELAY.*must be between 1.0 and 60.0",
+            ),
+            (
+                "not_a_number",
+                "Invalid configuration value.*Invalid INITIAL_RECONNECT_DELAY",
+            ),
             ("", "Invalid configuration value.*Invalid INITIAL_RECONNECT_DELAY"),
         ],
     )
@@ -307,9 +327,18 @@ class TestBotConfig:
     @pytest.mark.parametrize(
         "env_value,expected_error",
         [
-            ("29.0", "Invalid configuration value.*MAX_RECONNECT_DELAY.*must be between 30.0 and 3600.0"),
-            ("3601.0", "Invalid configuration value.*MAX_RECONNECT_DELAY.*must be between 30.0 and 3600.0"),
-            ("not_a_number", "Invalid configuration value.*Invalid MAX_RECONNECT_DELAY"),
+            (
+                "29.0",
+                "Invalid configuration value.*MAX_RECONNECT_DELAY.*must be between 30.0 and 3600.0",
+            ),
+            (
+                "3601.0",
+                "Invalid configuration value.*MAX_RECONNECT_DELAY.*must be between 30.0 and 3600.0",
+            ),
+            (
+                "not_a_number",
+                "Invalid configuration value.*Invalid MAX_RECONNECT_DELAY",
+            ),
         ],
     )
     def test_from_env_invalid_max_reconnect_delay(
@@ -322,3 +351,139 @@ class TestBotConfig:
         # Act & Assert
         with pytest.raises(ConfigurationError, match=expected_error):
             BotConfig.from_env()
+
+
+class TestPromptConfiguration:
+    """Test cases for prompt-related configuration."""
+
+    def test_default_prompt_configuration(self):
+        """Test default prompt configuration values."""
+        # Arrange & Act
+        config = BotConfig()
+
+        # Assert
+        assert config.prompt_style == "concise"
+        assert config.custom_system_prompt is None
+
+    @pytest.mark.parametrize(
+        "prompt_style",
+        ["concise", "detailed", "adaptive", "custom"],
+    )
+    def test_valid_prompt_styles_from_env(self, monkeypatch, prompt_style):
+        """Test valid prompt styles are accepted from environment."""
+        # Arrange
+        monkeypatch.setenv("PROMPT_STYLE", prompt_style)
+        if prompt_style == "custom":
+            monkeypatch.setenv("CUSTOM_SYSTEM_PROMPT", "Custom prompt text")
+
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.prompt_style == prompt_style
+
+    def test_custom_prompt_style_requires_custom_system_prompt(self, monkeypatch):
+        """Test that custom prompt style requires CUSTOM_SYSTEM_PROMPT."""
+        # Arrange
+        monkeypatch.setenv("PROMPT_STYLE", "custom")
+        # Don't set CUSTOM_SYSTEM_PROMPT
+
+        # Act & Assert
+        with pytest.raises(
+            ConfigurationError,
+            match="CUSTOM_SYSTEM_PROMPT must be provided when PROMPT_STYLE is 'custom'",
+        ):
+            BotConfig.from_env()
+
+    def test_custom_system_prompt_from_env(self, monkeypatch):
+        """Test setting custom system prompt from environment."""
+        # Arrange
+        custom_prompt = "You are a helpful assistant with special instructions."
+        monkeypatch.setenv("PROMPT_STYLE", "custom")
+        monkeypatch.setenv("CUSTOM_SYSTEM_PROMPT", custom_prompt)
+
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.prompt_style == "custom"
+        assert config.custom_system_prompt == custom_prompt
+
+    @pytest.mark.parametrize(
+        "invalid_style",
+        ["invalid", "unknown", "wrong", ""],
+    )
+    def test_invalid_prompt_styles_raise_error(self, monkeypatch, invalid_style):
+        """Test that invalid prompt styles raise ConfigurationError."""
+        # Arrange
+        monkeypatch.setenv("PROMPT_STYLE", invalid_style)
+
+        # Act & Assert
+        with pytest.raises(
+            ConfigurationError,
+            match="PROMPT_STYLE must be 'concise', 'detailed', 'adaptive', or 'custom'",
+        ):
+            BotConfig.from_env()
+
+    @pytest.mark.parametrize(
+        "case_variation,expected",
+        [
+            ("CONCISE", "concise"),
+            ("Detailed", "detailed"),
+            ("ADAPTIVE", "adaptive"),
+            ("Custom", "custom"),
+        ],
+    )
+    def test_prompt_style_case_insensitive(self, monkeypatch, case_variation, expected):
+        """Test that prompt style matching is case-insensitive for user friendliness."""
+        # Arrange
+        monkeypatch.setenv("PROMPT_STYLE", case_variation)
+        if expected == "custom":
+            monkeypatch.setenv("CUSTOM_SYSTEM_PROMPT", "Custom prompt")
+
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.prompt_style == expected
+
+    def test_custom_system_prompt_ignored_for_non_custom_styles(self, monkeypatch):
+        """Test that CUSTOM_SYSTEM_PROMPT is ignored for non-custom styles."""
+        # Arrange
+        monkeypatch.setenv("PROMPT_STYLE", "detailed")
+        monkeypatch.setenv("CUSTOM_SYSTEM_PROMPT", "This should be ignored")
+
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.prompt_style == "detailed"
+        assert config.custom_system_prompt == "This should be ignored"
+
+    def test_max_tokens_reduced_default(self):
+        """Test that default max_tokens is reduced for concise responses."""
+        # Arrange & Act
+        config = BotConfig()
+
+        # Assert
+        assert config.llm_max_tokens == 100  # Reduced from 150
+
+    def test_max_tokens_from_env_with_new_default(self):
+        """Test max_tokens environment variable with new default."""
+        # Arrange - Don't set LLM_MAX_TOKENS, should use new default
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.llm_max_tokens == 100  # New default
+
+    def test_max_tokens_override_from_env(self, monkeypatch):
+        """Test overriding max_tokens from environment."""
+        # Arrange
+        monkeypatch.setenv("LLM_MAX_TOKENS", "200")
+
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.llm_max_tokens == 200
