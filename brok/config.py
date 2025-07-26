@@ -33,8 +33,8 @@ class BotConfig:
     ignore_users: list[str] = field(default_factory=list)
     context_window_size: int = 10
 
-    # Enhanced context settings (KEP-001)
-    enhanced_context: bool = False  # Feature flag for structured context
+    # Enhanced context settings (KEP-001) - Now enabled by default
+    enhanced_context: bool = True  # Feature flag for structured context - ENABLED
     max_context_tokens: int = 500
     prioritize_mentions: bool = True
     include_bot_responses: bool = True
@@ -151,8 +151,8 @@ class BotConfig:
                 os.getenv("BOT_RESPOND_TO_COMMANDS", "true").lower() == "true"
             )
 
-            # Parse enhanced context settings (KEP-001)
-            enhanced_context = os.getenv("ENHANCED_CONTEXT", "false").lower() == "true"
+            # Parse enhanced context settings (KEP-001) - Now defaults to enabled
+            enhanced_context = os.getenv("ENHANCED_CONTEXT", "true").lower() == "true"
             max_context_tokens = cls._parse_positive_int("MAX_CONTEXT_TOKENS", "500")
             prioritize_mentions = (
                 os.getenv("PRIORITIZE_MENTIONS", "true").lower() == "true"

@@ -215,12 +215,12 @@ class ChatClient:
         respond_to_mentions: bool = True,
         respond_to_commands: bool = True,
         ignore_users: list[str] | None = None,
-        enhanced_context: bool = False,
+        enhanced_context: bool = True,  # Now defaults to True
         max_context_tokens: int = 500,
         prioritize_mentions: bool = True,
         include_bot_responses: bool = True,
     ):
-        """Initialize chat client.
+        """Initialize chat client with enhanced context capabilities.
 
         Args:
             response_filters: List of functions to determine if bot should respond
@@ -239,7 +239,7 @@ class ChatClient:
         self._bot_name = bot_name
         self._respond_to_mentions = respond_to_mentions
         self._respond_to_commands = respond_to_commands
-        
+
         # Enhanced context settings (KEP-001)
         self._enhanced_context = enhanced_context
         self._max_context_tokens = max_context_tokens
@@ -250,12 +250,15 @@ class ChatClient:
         self._ignore_users = {user.lower() for user in (ignore_users or [])}
         self._ignore_users.add(bot_name.lower())  # Add bot name (case-insensitive)
 
-        # Context storage - always initialize both, choose which to use based on flag
-        self._context_messages_structured: deque[ContextMessage] = deque(
-            maxlen=context_window_size if enhanced_context else 0
-        )
-        self._context_messages_legacy: list[str] = []
-            
+        # Context storage - Enhanced context by default
+        if self._enhanced_context:
+            self._context_messages_structured: deque[ContextMessage] = deque(
+                maxlen=context_window_size
+            )
+        else:
+            # Legacy fallback for backward compatibility
+            self._context_messages_legacy: list[str] = []
+
         self._processing_queue: asyncio.Queue[ProcessedMessage] = asyncio.Queue()
         self._session: AsyncSession | None = None
         self._is_connected = False
@@ -378,10 +381,10 @@ class ChatClient:
     async def add_message_to_context(
         self, message: str, sender: str, is_bot: bool = False
     ) -> None:
-        """Add message to rolling context window.
+        """Add message to rolling context window with structured metadata.
 
         Maintains a sliding window of recent chat messages for providing
-        context to the LLM. Supports both legacy and enhanced context modes.
+        context to the LLM. Uses enhanced structured context by default.
 
         Args:
             message: The chat message text
@@ -412,38 +415,138 @@ class ChatClient:
                 f"Added to legacy context: {formatted} (window size: {len(self._context_messages_legacy)})"
             )
 
-    def get_context(self, current_sender: str | None = None) -> str | None:  # noqa: ARG002
-        """Get current conversation context as a formatted string.
+    def get_context(self, current_sender: str | None = None) -> str | None:
+        """Get current conversation context with mention-aware prioritization.
 
-        Supports both legacy and enhanced context modes while maintaining
-        backward compatibility by returning the same string format.
+        Implements KEP-001 Increment B by prioritizing messages from users who
+        mention the bot and applying token-based context limits.
 
         Args:
-            current_sender: Optional sender for mention prioritization (KEP-001)
+            current_sender: Username of current message sender for prioritization
 
         Returns:
             str | None: Formatted context or None if no context available
         """
         if self._enhanced_context:
-            # Enhanced context mode (KEP-001) - format structured messages
+            # Enhanced context mode (KEP-001 Increment B)
             if not self._context_messages_structured:
                 return None
 
-            # For Increment A, maintain simple behavior - just format messages
-            # Future increments will add mention prioritization and token limits
-            formatted_messages = []
+            # Filter messages based on include_bot_responses setting
+            filtered_messages = []
             for ctx_msg in self._context_messages_structured:
                 if not self._include_bot_responses and ctx_msg.is_bot:
                     continue
-                formatted_messages.append(f"{ctx_msg.sender}: {ctx_msg.content}")
+                filtered_messages.append(ctx_msg)
 
-            return "\n".join(formatted_messages) if formatted_messages else None
+            if not filtered_messages:
+                return None
+
+            # Apply mention-aware prioritization if enabled
+            if self._prioritize_mentions and current_sender:
+                prioritized_messages = self._prioritize_context_messages(
+                    filtered_messages, current_sender
+                )
+            else:
+                # Just use chronological order (most recent first)
+                prioritized_messages = list(reversed(filtered_messages))
+
+            # Apply token-based context limiting
+            context_messages = self._apply_token_limit(prioritized_messages)
+
+            # Format messages with enhanced sender attribution
+            formatted_messages = []
+            for ctx_msg in context_messages:
+                prefix = "🤖 " if ctx_msg.is_bot else ""
+                formatted_messages.append(
+                    f"{prefix}{ctx_msg.sender}: {ctx_msg.content}"
+                )
+
+            return "\n".join(formatted_messages)
         else:
             # Legacy context mode - maintain exact existing behavior
             if not self._context_messages_legacy:
                 return None
 
             return "\n".join(self._context_messages_legacy)
+
+    def _prioritize_context_messages(
+        self, messages: list[ContextMessage], current_sender: str
+    ) -> list[ContextMessage]:
+        """Prioritize context messages based on mentions and current sender.
+
+        KEP-001 Increment B: Implements mention-aware context prioritization
+        by putting messages from the current sender and recent mentions first.
+
+        Args:
+            messages: List of context messages to prioritize
+            current_sender: Username of current message sender
+
+        Returns:
+            list[ContextMessage]: Prioritized messages (most relevant first)
+        """
+        # Separate messages into categories
+        sender_messages = []
+        mention_messages = []
+        other_messages = []
+
+        bot_name_lower = self._bot_name.lower()
+
+        for msg in messages:
+            if msg.sender == current_sender:
+                sender_messages.append(msg)
+            elif (
+                bot_name_lower in msg.content.lower()
+                or f"@{bot_name_lower}" in msg.content.lower()
+            ):
+                mention_messages.append(msg)
+            else:
+                other_messages.append(msg)
+
+        # Sort each category by timestamp (most recent first)
+        sender_messages.sort(key=lambda x: x.timestamp, reverse=True)
+        mention_messages.sort(key=lambda x: x.timestamp, reverse=True)
+        other_messages.sort(key=lambda x: x.timestamp, reverse=True)
+
+        # Combine prioritized: sender messages, then mentions, then others
+        return sender_messages + mention_messages + other_messages
+
+    def _apply_token_limit(
+        self, messages: list[ContextMessage]
+    ) -> list[ContextMessage]:
+        """Apply token-based context limiting to stay within configured limits.
+
+        KEP-001 Increment B: Implements token-aware context truncation to prevent
+        overwhelming the LLM with too much context.
+
+        Args:
+            messages: Prioritized messages to potentially truncate
+
+        Returns:
+            list[ContextMessage]: Messages within token limit
+        """
+        if not messages:
+            return []
+
+        # Simple token estimation: roughly 4 characters per token
+        # This is a conservative estimate for most models
+        estimated_tokens = 0
+        selected_messages = []
+
+        for msg in messages:
+            # Estimate tokens for this message (sender + content + formatting)
+            prefix = "🤖 " if msg.is_bot else ""
+            message_text = f"{prefix}{msg.sender}: {msg.content}"
+            message_tokens = len(message_text) // 4  # Rough token estimation
+
+            # Check if adding this message would exceed limit
+            if estimated_tokens + message_tokens > self._max_context_tokens:
+                break
+
+            selected_messages.append(msg)
+            estimated_tokens += message_tokens
+
+        return selected_messages
 
     async def send_message(self, message: str) -> None:
         """Send message to chat.
@@ -543,7 +646,7 @@ class ChatClient:
         try:
             should_respond, message_type, parsed_command = await should_respond_task
             if should_respond:
-                context = self.get_context()
+                context = self.get_context(current_sender=sender)
 
                 # Create processed message with new fields
                 processed_msg = ProcessedMessage(
@@ -560,7 +663,7 @@ class ChatClient:
                 await self._processing_queue.put(processed_msg)
 
                 # Enhanced logging
-                if message_type == "command":
+                if message_type == "command" and parsed_command:
                     logger.info(
                         f"Queued command '{parsed_command.command}' from {sender} for LLM processing"
                     )
