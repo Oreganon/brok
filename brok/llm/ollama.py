@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import asyncio  # Added to catch asyncio.TimeoutError
+import logging
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -53,6 +53,7 @@ class OllamaProvider(LLMProvider):
         self.model = model
         self.config = config
         self._session = session
+        self._session_lock = asyncio.Lock()
         self._last_metadata: LLMMetadata = {}
 
     async def generate(
@@ -75,10 +76,19 @@ class OllamaProvider(LLMProvider):
             LLMTimeoutError: When the request times out
             LLMGenerationError: When Ollama returns an error
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.config.timeout_seconds)
-            )
+        # Ensure session is created safely with lock to prevent race conditions
+        # Only create new session if we don't have one or if it's a real aiohttp session that's closed
+        if not self._session or (
+            isinstance(self._session, aiohttp.ClientSession) and self._session.closed
+        ):
+            async with self._session_lock:
+                if not self._session or (
+                    isinstance(self._session, aiohttp.ClientSession)
+                    and self._session.closed
+                ):
+                    self._session = aiohttp.ClientSession(
+                        timeout=aiohttp.ClientTimeout(total=self.config.timeout_seconds)
+                    )
 
         # Build the full prompt with context
         full_prompt = self._build_prompt(prompt, context)
@@ -130,7 +140,7 @@ class OllamaProvider(LLMProvider):
         except aiohttp.ClientError as e:
             raise LLMConnectionError(f"Failed to connect to Ollama: {e}") from e
         # Handle timeout errors from aiohttp as well as generic asyncio timeouts
-        except (aiohttp.ServerTimeoutError, asyncio.TimeoutError) as e:
+        except (TimeoutError, aiohttp.ServerTimeoutError) as e:
             raise LLMTimeoutError(f"Ollama request timed out: {e}") from e
         except Exception as e:
             if isinstance(e, LLMConnectionError | LLMTimeoutError | LLMGenerationError):
@@ -148,22 +158,20 @@ class OllamaProvider(LLMProvider):
         Raises:
             LLMConnectionError: When unable to connect to Ollama
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(
-                    total=5.0
-                )  # Short timeout for health check
-            )
+        # Create a separate session for health checks with short timeout
+        health_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0))
 
         try:
             logger.debug(f"Health check: {self.base_url}/api/tags")
-            async with self._session.get(f"{self.base_url}/api/tags") as response:
+            async with health_session.get(f"{self.base_url}/api/tags") as response:
                 is_healthy = response.status == 200
                 logger.debug(f"Health check result: {is_healthy}")
                 return is_healthy
         except Exception as e:
             logger.warning(f"Health check failed: {e}")
             raise LLMConnectionError(f"Ollama health check failed: {e}") from e
+        finally:
+            await health_session.close()
 
     def get_metadata(self) -> LLMMetadata:
         """Get metadata from last generation.

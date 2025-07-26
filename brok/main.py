@@ -157,6 +157,15 @@ async def main() -> None:
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         logging.getLogger(__name__).exception("Unexpected error in main")
+    finally:
+        # Ensure LLM provider cleanup even if startup fails
+        if "llm_provider" in locals() and hasattr(llm_provider, "close"):
+            try:
+                await llm_provider.close()
+            except Exception as cleanup_error:
+                logging.getLogger(__name__).warning(
+                    f"Error during LLM provider cleanup: {cleanup_error}"
+                )
 
 
 def setup_logging(level: str, log_chat_messages: bool) -> None:
@@ -188,4 +197,4 @@ def main_sync() -> None:
 
 
 if __name__ == "__main__":
-    main_sync() 
+    main_sync()
