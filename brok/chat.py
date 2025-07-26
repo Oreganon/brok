@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable
 
 from wsggpy import AsyncSession, ChatEnvironment, Message, RoomAction
@@ -235,7 +236,14 @@ class ChatClient:
         try:
             sender = message.sender.nick
             content = message.message
-            timestamp = message.timestamp / 1000.0  # Convert to seconds
+            
+            # Handle timestamp conversion - could be datetime or numeric
+            if isinstance(message.timestamp, datetime):
+                # Convert datetime to Unix timestamp in seconds
+                timestamp = message.timestamp.timestamp()
+            else:
+                # Assume it's milliseconds, convert to seconds
+                timestamp = message.timestamp / 1000.0
 
             logger.debug(f"Received message from {sender}: {content}")
 
