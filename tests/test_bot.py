@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
@@ -38,6 +38,12 @@ def mock_chat_client() -> AsyncMock:
     client.is_connected.return_value = True
     client.get_next_message = AsyncMock()
     client.send_message = AsyncMock()
+
+    # Mock the _processing_queue.qsize() to return an integer
+    mock_queue = Mock()
+    mock_queue.qsize.return_value = 0  # Return an int, not a coroutine
+    client._processing_queue = mock_queue
+
     return client
 
 
@@ -47,6 +53,7 @@ def mock_llm_provider() -> AsyncMock:
     provider = AsyncMock()
     provider.health_check.return_value = True
     provider.get_metadata.return_value = {"tokens_used": 10, "provider": "test"}
+    provider.set_tool_registry = Mock(return_value=None)  # Avoid coroutine warning
     return provider
 
 
@@ -172,13 +179,27 @@ class TestChatBot:
         mock_chat_client.get_next_message.side_effect = mock_get_next_message
 
         # Mock LLM to return chunks
+        class AsyncGeneratorMock:
+            def __init__(self, chunks):
+                self.chunks = chunks
+                self.index = 0
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self.index >= len(self.chunks):
+                    raise StopAsyncIteration
+                chunk = self.chunks[self.index]
+                self.index += 1
+                return chunk
+
+        # Mock the generate method by replacing it directly
         async def mock_generate(_prompt, _context):
             yield "Hello! "
             yield "How can I help you?"
 
-        mock_llm_provider.generate = AsyncMock(
-            side_effect=lambda p, c: mock_generate(p, c)
-        )
+        mock_llm_provider.generate = mock_generate
 
         # Act - Run worker for a short time
         chat_bot._shutdown_event = asyncio.Event()
@@ -229,7 +250,11 @@ class TestChatBot:
         mock_chat_client.get_next_message.side_effect = mock_get_next_message
 
         # Mock LLM to raise an error
-        mock_llm_provider.generate.side_effect = LLMProviderError("LLM failed")
+        async def mock_generate_error(_prompt, _context):
+            raise LLMProviderError("LLM failed")
+            yield  # This never executes but makes it an async generator
+
+        mock_llm_provider.generate = mock_generate_error
 
         # Act
         chat_bot._shutdown_event = asyncio.Event()
@@ -283,9 +308,7 @@ class TestChatBot:
             if False:  # Never execute
                 yield
 
-        mock_llm_provider.generate = AsyncMock(
-            side_effect=lambda p, c: empty_generate(p, c)
-        )
+        mock_llm_provider.generate = empty_generate
 
         # Act
         chat_bot._shutdown_event = asyncio.Event()

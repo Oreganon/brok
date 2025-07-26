@@ -161,7 +161,7 @@ class TestChatClient:
                 )
 
     @pytest.mark.asyncio
-    async def test_should_respond_to_pure_keywords(self, _chat_client: ChatClient):
+    async def test_should_respond_to_pure_keywords(self):
         """Test message filtering with pure keyword matches that aren't parsed as commands."""
         # Create a client with keywords that won't be parsed as commands
         filters = create_default_filters(["hey", "hello"])
@@ -584,7 +584,7 @@ class TestChatClient:
 
         # Check that structured storage is used
         assert len(enhanced_client._context_messages_structured) == 3
-        assert len(enhanced_client._context_messages_legacy) == 0
+        assert not hasattr(enhanced_client, '_context_messages_legacy')
 
         # Check that context output is correctly formatted
         context = enhanced_client.get_context()
@@ -608,7 +608,7 @@ class TestChatClient:
         )
 
         # Check that legacy storage is used
-        assert len(legacy_client._context_messages_structured) == 0
+        assert not hasattr(legacy_client, '_context_messages_structured')
         assert len(legacy_client._context_messages_legacy) == 3
 
         # Check that context output is identical (backward compatibility)

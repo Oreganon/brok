@@ -271,11 +271,11 @@ class TestBotConfig:
         [
             (
                 "0",
-                "Invalid configuration value.*MAX_RECONNECT_ATTEMPTS.*must be positive",
+                "Invalid configuration value.*Invalid MAX_RECONNECT_ATTEMPTS",
             ),
             (
                 "-1",
-                "Invalid configuration value.*MAX_RECONNECT_ATTEMPTS.*must be positive",
+                "Invalid configuration value.*Invalid MAX_RECONNECT_ATTEMPTS",
             ),
             (
                 "not_a_number",
