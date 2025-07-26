@@ -15,6 +15,7 @@ from brok.exceptions import ConfigurationError
 from brok.llm.base import LLMConfig
 from brok.llm.llamacpp import LlamaCppProvider
 from brok.llm.ollama import OllamaProvider
+from brok.prompts import create_custom_template, get_prompt_template
 
 
 def parse_args() -> argparse.Namespace:
@@ -116,6 +117,12 @@ async def main() -> None:
             ignore_users=config.ignore_users,
         )
 
+        # Create prompt template based on configuration
+        if config.prompt_style == "custom":
+            prompt_template = create_custom_template(config.custom_system_prompt)
+        else:
+            prompt_template = get_prompt_template(config.prompt_style)
+
         # Create LLM provider
         llm_config = LLMConfig(
             model_name=config.llm_model,
@@ -129,12 +136,14 @@ async def main() -> None:
                 base_url=config.llm_base_url,
                 model=config.llm_model,
                 config=llm_config,
+                prompt_template=prompt_template,
             )
         elif config.llm_provider == "llamacpp":
             llm_provider = LlamaCppProvider(
                 base_url=config.llm_base_url,
                 model=config.llm_model,
                 config=llm_config,
+                prompt_template=prompt_template,
             )
         else:
             raise ConfigurationError(

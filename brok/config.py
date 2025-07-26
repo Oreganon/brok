@@ -20,7 +20,7 @@ class BotConfig:
     llm_provider: str = "ollama"  # "ollama", "llamacpp"
     llm_model: str = "llama3.2:3b"
     llm_base_url: str = "http://localhost:11434"
-    llm_max_tokens: int = 150
+    llm_max_tokens: int = 100  # Reduced from 150 for more concise responses
     llm_temperature: float = 0.7
     llm_timeout_seconds: int = 30
     llm_max_concurrent_requests: int = 2
@@ -33,11 +33,23 @@ class BotConfig:
     ignore_users: list[str] = field(default_factory=list)
     context_window_size: int = 10
 
+    # Prompt settings
+    prompt_style: str = "concise"  # "concise", "detailed", "adaptive", or "custom"
+    custom_system_prompt: str | None = None  # Used when prompt_style is "custom"
+
     # Connection settings
-    max_reconnect_attempts: int = 10  # Max consecutive reconnection failures before giving up
-    initial_reconnect_delay: float = 5.0  # Initial delay between reconnection attempts (seconds)
-    max_reconnect_delay: float = 300.0  # Maximum delay between reconnection attempts (seconds)
-    connection_check_interval: int = 10  # How often to check connection status (seconds)
+    max_reconnect_attempts: int = (
+        10  # Max consecutive reconnection failures before giving up
+    )
+    initial_reconnect_delay: float = (
+        5.0  # Initial delay between reconnection attempts (seconds)
+    )
+    max_reconnect_delay: float = (
+        300.0  # Maximum delay between reconnection attempts (seconds)
+    )
+    connection_check_interval: int = (
+        10  # How often to check connection status (seconds)
+    )
 
     # Logging
     log_level: str = "INFO"
@@ -60,17 +72,27 @@ class BotConfig:
         """
         try:
             # Parse numeric values with validation
-            max_tokens = cls._parse_positive_int("LLM_MAX_TOKENS", "150")
+            max_tokens = cls._parse_positive_int(
+                "LLM_MAX_TOKENS", "100"
+            )  # Reduced default for concise responses
             temperature = cls._parse_float_range("LLM_TEMPERATURE", "0.7", 0.0, 2.0)
             timeout_seconds = cls._parse_positive_int("LLM_TIMEOUT", "30")
             max_concurrent = cls._parse_positive_int("LLM_MAX_CONCURRENT", "2")
             context_window_size = cls._parse_positive_int("CONTEXT_WINDOW_SIZE", "10")
-            
+
             # Parse connection settings
-            max_reconnect_attempts = cls._parse_positive_int("MAX_RECONNECT_ATTEMPTS", "10")
-            initial_reconnect_delay = cls._parse_float_range("INITIAL_RECONNECT_DELAY", "5.0", 1.0, 60.0)
-            max_reconnect_delay = cls._parse_float_range("MAX_RECONNECT_DELAY", "300.0", 30.0, 3600.0)
-            connection_check_interval = cls._parse_positive_int("CONNECTION_CHECK_INTERVAL", "10")
+            max_reconnect_attempts = cls._parse_positive_int(
+                "MAX_RECONNECT_ATTEMPTS", "10"
+            )
+            initial_reconnect_delay = cls._parse_float_range(
+                "INITIAL_RECONNECT_DELAY", "5.0", 1.0, 60.0
+            )
+            max_reconnect_delay = cls._parse_float_range(
+                "MAX_RECONNECT_DELAY", "300.0", 30.0, 3600.0
+            )
+            connection_check_interval = cls._parse_positive_int(
+                "CONNECTION_CHECK_INTERVAL", "10"
+            )
 
             # Validate environment
             chat_env = os.getenv("CHAT_ENV", "production")
@@ -104,6 +126,14 @@ class BotConfig:
             if not bot_name:
                 raise ConfigurationError("BOT_NAME cannot be empty")
 
+            # Parse ignore users list
+            ignore_users_str = os.getenv("BOT_IGNORE_USERS", "")
+            ignore_users = (
+                [user.strip() for user in ignore_users_str.split(",") if user.strip()]
+                if ignore_users_str
+                else []
+            )
+
             # Parse boolean flags
             respond_to_mentions = (
                 os.getenv("BOT_RESPOND_TO_MENTIONS", "true").lower() == "true"
@@ -111,6 +141,19 @@ class BotConfig:
             respond_to_commands = (
                 os.getenv("BOT_RESPOND_TO_COMMANDS", "true").lower() == "true"
             )
+
+            # Parse prompt configuration
+            prompt_style = os.getenv("PROMPT_STYLE", "concise").lower()
+            if prompt_style not in ("concise", "detailed", "adaptive", "custom"):
+                raise ConfigurationError(
+                    f"PROMPT_STYLE must be 'concise', 'detailed', 'adaptive', or 'custom', got: {prompt_style}"
+                )
+
+            custom_system_prompt = os.getenv("CUSTOM_SYSTEM_PROMPT")
+            if prompt_style == "custom" and not custom_system_prompt:
+                raise ConfigurationError(
+                    "CUSTOM_SYSTEM_PROMPT must be provided when PROMPT_STYLE is 'custom'"
+                )
 
             return cls(
                 chat_environment=chat_env,
@@ -126,7 +169,10 @@ class BotConfig:
                 respond_to_keywords=keywords,
                 respond_to_mentions=respond_to_mentions,
                 respond_to_commands=respond_to_commands,
+                ignore_users=ignore_users,
                 context_window_size=context_window_size,
+                prompt_style=prompt_style,
+                custom_system_prompt=custom_system_prompt,
                 max_reconnect_attempts=max_reconnect_attempts,
                 initial_reconnect_delay=initial_reconnect_delay,
                 max_reconnect_delay=max_reconnect_delay,

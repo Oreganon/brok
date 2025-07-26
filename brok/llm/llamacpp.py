@@ -10,6 +10,7 @@ import aiohttp
 
 from brok.exceptions import LLMConnectionError, LLMGenerationError, LLMTimeoutError
 from brok.llm.base import LLMConfig, LLMMetadata, LLMProvider
+from brok.prompts import PromptTemplate, get_prompt_template
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -42,6 +43,7 @@ class LlamaCppProvider(LLMProvider):
         base_url: str,
         model: str,
         config: LLMConfig,
+        prompt_template: PromptTemplate | None = None,
         session: aiohttp.ClientSession | None = None,
     ):
         """Initialize LlamaCpp provider.
@@ -50,11 +52,13 @@ class LlamaCppProvider(LLMProvider):
             base_url: LlamaCpp server URL (e.g. "http://localhost:8080")
             model: Model name (e.g. "llama3.2:3b") - informational only
             config: LLM configuration settings
+            prompt_template: Optional prompt template (defaults to concise style)
             session: Optional aiohttp session (will create if None)
         """
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.config = config
+        self.prompt_template = prompt_template or get_prompt_template("concise")
         self._session = session
         self._session_lock = asyncio.Lock()
         self._last_metadata: LLMMetadata = {}
@@ -203,7 +207,7 @@ class LlamaCppProvider(LLMProvider):
         return self._last_metadata.copy()
 
     def _build_prompt(self, prompt: str, context: str | None) -> str:
-        """Build the full prompt with optional context.
+        """Build the full prompt with optional context using the configured template.
 
         Args:
             prompt: The user's input message
@@ -212,11 +216,7 @@ class LlamaCppProvider(LLMProvider):
         Returns:
             str: The complete prompt to send to LlamaCpp
         """
-        if context:
-            # Simple context integration - can be enhanced later
-            return f"Context:\n{context}\n\nUser: {prompt}\nAssistant:"
-        else:
-            return f"User: {prompt}\nAssistant:"
+        return self.prompt_template.build_prompt(prompt, context)
 
     async def close(self) -> None:
         """Close the HTTP session if we own it."""
