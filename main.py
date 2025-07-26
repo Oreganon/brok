@@ -182,5 +182,10 @@ def setup_logging(level: str, log_chat_messages: bool) -> None:
         logging.getLogger("brok.chat").setLevel(logging.WARNING)
 
 
-if __name__ == "__main__":
+def main_sync() -> None:
+    """Synchronous entry point for console script."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    main_sync()
