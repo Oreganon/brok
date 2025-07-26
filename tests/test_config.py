@@ -544,3 +544,39 @@ class TestXMLPromptFormattingConfig:
 
         # Assert
         assert config.xml_prompt_formatting is True
+
+    def test_log_level_direct_assignment(self):
+        """Test that log_level can be directly assigned for CLI override functionality."""
+        # Arrange
+        config = BotConfig()
+        original_log_level = config.log_level
+
+        # Act - Test each valid log level
+        for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
+            config.log_level = level
+
+            # Assert
+            assert config.log_level == level
+
+        # Test that assignment works with different case (though validation happens elsewhere)
+        config.log_level = "info"
+        assert config.log_level == "info"
+
+        # Restore original
+        config.log_level = original_log_level
+
+    def test_log_level_environment_variable_loading(self, monkeypatch):
+        """Test that LOG_LEVEL environment variable is correctly loaded."""
+        # Arrange
+        test_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+        for level in test_levels:
+            # Clear environment
+            monkeypatch.delenv("LOG_LEVEL", raising=False)
+            monkeypatch.setenv("LOG_LEVEL", level)
+
+            # Act
+            config = BotConfig.from_env()
+
+            # Assert
+            assert config.log_level == level

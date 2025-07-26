@@ -18,8 +18,15 @@ from brok.llm.ollama import OllamaProvider
 from brok.prompts import create_custom_template, get_prompt_template
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
+def parse_args(args: list[str] | None = None) -> argparse.Namespace:
+    """Parse command line arguments.
+
+    Args:
+        args: Optional list of arguments to parse. If None, uses sys.argv.
+
+    Returns:
+        Parsed arguments namespace.
+    """
     parser = argparse.ArgumentParser(
         description="Brok - AI chatbot for strims.gg chat integration",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -36,6 +43,10 @@ Examples:
   python main.py --llm-provider llamacpp           # Use LlamaCpp via CLI flag
   python main.py --llm-url http://localhost:8080   # Override LLM API URL
   python main.py --llm-provider llamacpp --llm-url http://localhost:8080  # Combined
+
+  # Logging configuration:
+  python main.py --log-level DEBUG  # Enable debug logging
+  python main.py --log-level ERROR  # Only show errors
 
 Environment Variables:
   STRIMS_JWT                 JWT token for authentication
@@ -75,7 +86,14 @@ Environment Variables:
         help="LLM provider to use (overrides LLM_PROVIDER environment variable)",
     )
 
-    return parser.parse_args()
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging level (overrides LOG_LEVEL environment variable)",
+    )
+
+    return parser.parse_args(args)
 
 
 async def main() -> None:
@@ -95,6 +113,8 @@ async def main() -> None:
             config.llm_base_url = args.llm_url
         if args.llm_provider:
             config.llm_provider = args.llm_provider
+        if args.log_level:
+            config.log_level = args.log_level
 
         # Set up logging
         setup_logging(config.log_level, config.log_chat_messages)
