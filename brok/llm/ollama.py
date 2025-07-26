@@ -60,7 +60,7 @@ class OllamaProvider(LLMProvider):
         self._session_lock = asyncio.Lock()
         self._last_metadata: LLMMetadata = {}
 
-    async def generate(
+    async def generate(  # type: ignore[override]
         self, prompt: str, context: str | None = None
     ) -> AsyncGenerator[str]:
         """Generate response from Ollama API.
@@ -168,7 +168,7 @@ class OllamaProvider(LLMProvider):
         try:
             logger.debug(f"Health check: {self.base_url}/api/tags")
             async with health_session.get(f"{self.base_url}/api/tags") as response:
-                is_healthy = response.status == 200
+                is_healthy = bool(response.status == 200)
                 logger.debug(f"Health check result: {is_healthy}")
                 return is_healthy
         except Exception as e:

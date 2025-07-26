@@ -62,7 +62,7 @@ class BaseTool(ABC):
     description: ClassVar[str] = ""
     parameters: ClassVar[dict[str, Any]] = {}
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         """Validate tool metadata when subclassing."""
         super().__init_subclass__(**kwargs)
 
@@ -76,7 +76,7 @@ class BaseTool(ABC):
             raise TypeError(f"Tool {cls.__name__} must define 'parameters' as a dict")
 
     @abstractmethod
-    async def execute(self, **kwargs) -> ToolExecutionResult:
+    async def execute(self, **kwargs: Any) -> ToolExecutionResult:
         """Execute the tool with the given parameters.
 
         Args:

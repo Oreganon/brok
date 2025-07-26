@@ -628,14 +628,16 @@ class ChatClient:
 
         elif hasattr(self, "_context_messages_legacy"):
             # Legacy mode memory calculation
-            messages = self._context_messages_legacy
-            stats["message_count"] = len(messages)
+            legacy_messages = self._context_messages_legacy
+            stats["message_count"] = len(legacy_messages)
 
-            if messages:
-                total_bytes = sum(sys.getsizeof(msg) for msg in messages)
+            if legacy_messages:
+                total_bytes = sum(sys.getsizeof(msg) for msg in legacy_messages)
                 stats["total_context_bytes"] = total_bytes
-                stats["avg_message_size"] = total_bytes // len(messages)
-                stats["estimated_tokens"] = sum(len(msg) for msg in messages) // 4
+                stats["avg_message_size"] = total_bytes // len(legacy_messages)
+                stats["estimated_tokens"] = (
+                    sum(len(msg) for msg in legacy_messages) // 4
+                )
 
         return stats
 

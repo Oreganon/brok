@@ -306,7 +306,7 @@ class ToolParser:
 
         Expected format: param1=value1 param2="value with spaces" param3=123
         """
-        params = {}
+        params: dict[str, Any] = {}
 
         # Pattern to match key=value pairs, handling quoted values
         pattern = r'(\\w+)=(?:"([^"]*)"|([^\\s]+))'

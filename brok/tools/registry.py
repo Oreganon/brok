@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from brok.tools.base import BaseTool, ToolExecutionError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,7 @@ class ToolRegistry:
         >>> result = await registry.execute_tool("weather", {"city": "London"})
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize an empty tool registry."""
         self._tools: dict[str, BaseTool] = {}
         logger.debug("Initialized tool registry")
@@ -190,6 +193,6 @@ class ToolRegistry:
         """Check if a tool is registered using 'in' operator."""
         return name in self._tools
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[BaseTool]:
         """Iterate over registered tools."""
         return iter(self._tools.values())

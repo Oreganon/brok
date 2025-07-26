@@ -12,7 +12,7 @@ from brok.bot import ChatBot
 from brok.chat import ChatClient, create_default_filters
 from brok.config import BotConfig
 from brok.exceptions import ConfigurationError
-from brok.llm.base import LLMConfig
+from brok.llm.base import LLMConfig, LLMProvider
 from brok.llm.llamacpp import LlamaCppProvider
 from brok.llm.ollama import OllamaProvider
 from brok.prompts import create_custom_template, get_prompt_template
@@ -123,6 +123,10 @@ async def main() -> None:
 
         # Create prompt template based on configuration
         if config.prompt_style == "custom":
+            if config.custom_system_prompt is None:
+                raise ValueError(
+                    "custom_system_prompt must be provided when using custom prompt style"
+                )
             prompt_template = create_custom_template(config.custom_system_prompt)
         else:
             prompt_template = get_prompt_template(config.prompt_style)
@@ -135,6 +139,7 @@ async def main() -> None:
             timeout_seconds=config.llm_timeout_seconds,
         )
 
+        llm_provider: LLMProvider
         if config.llm_provider == "ollama":
             llm_provider = OllamaProvider(
                 base_url=config.llm_base_url,

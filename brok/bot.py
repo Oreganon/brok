@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import logging
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from brok.exceptions import BrokError, LLMProviderError, LLMTimeoutError
 from brok.tools import (
@@ -444,7 +444,7 @@ class ChatBot:
                 start_time = time.time()
                 try:
                     response_chunks = []
-                    async for chunk in self._llm_provider.generate(
+                    async for chunk in self._llm_provider.generate(  # type: ignore[attr-defined]
                         message.original_message, message.context
                     ):
                         response_chunks.append(chunk)
@@ -628,7 +628,7 @@ class ChatBot:
         """
         return self._stats
 
-    async def get_health_status(self) -> dict[str, any]:
+    async def get_health_status(self) -> dict[str, Any]:
         """Get comprehensive health status for monitoring and debugging.
 
         Returns detailed health information including:

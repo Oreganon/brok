@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import aiohttp
 
@@ -37,7 +37,7 @@ class WeatherTool(BaseTool):
         "required": ["city"],
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the weather tool.
 
         Uses wttr.in service which requires no API key.
@@ -45,7 +45,7 @@ class WeatherTool(BaseTool):
         self.base_url = "https://wttr.in"
         logger.debug("WeatherTool initialized using wttr.in service")
 
-    async def execute(self, **kwargs) -> ToolExecutionResult:
+    async def execute(self, **kwargs: Any) -> ToolExecutionResult:
         """Execute the weather tool to get current weather.
 
         Args:
@@ -78,7 +78,7 @@ class WeatherTool(BaseTool):
         try:
             async with (
                 aiohttp.ClientSession() as session,
-                session.get(url, timeout=10) as response,
+                session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response,
             ):
                 if response.status == 200:
                     weather_text = await response.text()

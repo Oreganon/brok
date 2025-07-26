@@ -63,7 +63,7 @@ class LlamaCppProvider(LLMProvider):
         self._session_lock = asyncio.Lock()
         self._last_metadata: LLMMetadata = {}
 
-    async def generate(
+    async def generate(  # type: ignore[override]
         self, prompt: str, context: str | None = None
     ) -> AsyncGenerator[str]:
         """Generate response from LlamaCpp HTTP server.
@@ -189,7 +189,7 @@ class LlamaCppProvider(LLMProvider):
             async with health_session.post(
                 f"{self.base_url}/completion", json=payload
             ) as response:
-                is_healthy = response.status == 200
+                is_healthy = bool(response.status == 200)
                 logger.debug(f"Health check result: {is_healthy} (via /completion)")
                 return is_healthy
         except Exception as e:

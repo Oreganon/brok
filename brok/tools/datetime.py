@@ -4,12 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import ClassVar
-
-try:
-    import zoneinfo
-except ImportError:
-    zoneinfo = None
+from typing import Any, ClassVar
+import zoneinfo
 
 from brok.tools.base import BaseTool, ToolExecutionResult
 
@@ -80,7 +76,7 @@ class DateTimeTool(BaseTool):
         "required": [],
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the datetime tool."""
         logger.debug("DateTimeTool initialized")
 
@@ -133,7 +129,7 @@ class DateTimeTool(BaseTool):
                 f"Please use a valid IANA timezone name like: {', '.join(common_examples)}"
             )
 
-    async def execute(self, **kwargs) -> ToolExecutionResult:
+    async def execute(self, **kwargs: Any) -> ToolExecutionResult:
         """Execute the datetime tool to get current date/time.
 
         Args:
@@ -173,30 +169,19 @@ class DateTimeTool(BaseTool):
 
             # Handle timezone if specified
             if timezone_name:
-                if zoneinfo is not None:
-                    try:
-                        tz = zoneinfo.ZoneInfo(timezone_name)
-                        now = now.replace(tzinfo=tz)
-                        tz_display = timezone_name
-                    except Exception as e:
-                        # This should not happen after normalization, but just in case
-                        logger.exception(
-                            f"Failed to apply validated timezone '{timezone_name}'"
-                        )
-                        return ToolExecutionResult(
-                            success=False,
-                            data="",
-                            error=f"Failed to apply timezone '{timezone_name}': {e}",
-                        )
-                else:
-                    # Fallback for Python < 3.9
-                    logger.warning(
-                        "zoneinfo not available, cannot apply custom timezone"
+                try:
+                    tz = zoneinfo.ZoneInfo(timezone_name)
+                    now = now.replace(tzinfo=tz)
+                    tz_display = timezone_name
+                except Exception as e:
+                    # This should not happen after normalization, but just in case
+                    logger.exception(
+                        f"Failed to apply validated timezone '{timezone_name}'"
                     )
                     return ToolExecutionResult(
                         success=False,
                         data="",
-                        error="Timezone support requires Python 3.9+ with zoneinfo module",
+                        error=f"Failed to apply timezone '{timezone_name}': {e}",
                     )
             else:
                 tz_display = "system"

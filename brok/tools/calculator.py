@@ -7,7 +7,7 @@ import logging
 import math
 import operator
 import re
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from brok.tools.base import BaseTool, ToolExecutionResult
 
@@ -81,7 +81,7 @@ class CalculatorTool(BaseTool):
         "tau": math.tau,
     }
 
-    async def execute(self, **kwargs) -> ToolExecutionResult:
+    async def execute(self, **kwargs: Any) -> ToolExecutionResult:
         """Execute the calculator tool to evaluate an expression.
 
         Args:
@@ -164,7 +164,7 @@ class CalculatorTool(BaseTool):
 
         return expression.strip()
 
-    def _safe_eval(self, expression: str) -> float | int:
+    def _safe_eval(self, expression: str) -> float | int | list[float | int]:
         """Safely evaluate a mathematical expression using AST."""
         try:
             # Parse the expression
@@ -176,14 +176,21 @@ class CalculatorTool(BaseTool):
         except SyntaxError as e:
             raise ValueError(f"Invalid expression syntax: {e!s}") from e
 
-    def _eval_node(self, node: ast.AST) -> float | int:
+    def _eval_node(self, node: ast.AST) -> float | int | list[float | int]:
         """Recursively evaluate an AST node."""
         if isinstance(node, ast.Constant):
-            return node.value
+            if isinstance(node.value, int | float):
+                return node.value
+            else:
+                raise TypeError(f"Unsupported constant type: {type(node.value)}")
 
         elif isinstance(node, ast.Name):
             if node.id in self.CONSTANTS:
-                return self.CONSTANTS[node.id]
+                value = self.CONSTANTS[node.id]
+                if isinstance(value, int | float):
+                    return value
+                else:
+                    raise ValueError(f"Constant {node.id} is not a number")
             else:
                 raise ValueError(f"Unknown variable: {node.id}")
 
@@ -192,7 +199,7 @@ class CalculatorTool(BaseTool):
             right = self._eval_node(node.right)
             op = self.OPERATORS.get(type(node.op))
             if op:
-                return op(left, right)
+                return op(left, right)  # type: ignore[no-any-return]
             else:
                 raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
 
@@ -200,7 +207,7 @@ class CalculatorTool(BaseTool):
             operand = self._eval_node(node.operand)
             op = self.OPERATORS.get(type(node.op))
             if op:
-                return op(operand)
+                return op(operand)  # type: ignore[no-any-return]
             else:
                 raise ValueError(
                     f"Unsupported unary operator: {type(node.op).__name__}"
@@ -210,18 +217,33 @@ class CalculatorTool(BaseTool):
             func_name = node.func.id if isinstance(node.func, ast.Name) else None
             if func_name in self.FUNCTIONS:
                 args = [self._eval_node(arg) for arg in node.args]
-                return self.FUNCTIONS[func_name](*args)
+                return self.FUNCTIONS[func_name](*args)  # type: ignore[no-any-return]
             else:
                 raise ValueError(f"Unknown function: {func_name}")
 
         elif isinstance(node, ast.List):
-            return [self._eval_node(item) for item in node.elts]
+            # For lists, ensure all elements are numbers, not nested lists
+            elements = []
+            for item in node.elts:
+                result = self._eval_node(item)
+                if isinstance(result, int | float):
+                    elements.append(result)
+                else:
+                    raise TypeError(
+                        f"List elements must be numbers, got {type(result).__name__}"
+                    )
+            return elements
 
         else:
             raise TypeError(f"Unsupported expression type: {type(node).__name__}")
 
-    def _format_result(self, expression: str, result: float | int) -> str:
+    def _format_result(
+        self, expression: str, result: float | int | list[float | int]
+    ) -> str:
         """Format the calculation result for display."""
+        if isinstance(result, list):
+            return f"{expression} = {result}"
+
         # Round floating point results to avoid long decimals
         if isinstance(result, float):
             if result.is_integer():
