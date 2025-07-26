@@ -108,20 +108,12 @@ impl App {
 
             match self.tool_manager.execute_tool(tool_call).await {
                 Ok(result) => {
-                    if result.success {
-                        // Pass tool result to LLM for response generation
-                        let tool_context = format!("Tool call result: {}", result.content);
-                        let enhanced_prompt = format!("The user asked: \"{prompt}\" and I retrieved this information: {tool_context}. Please provide a natural response.");
-                        return self
-                            .get_llm_response(enhanced_prompt, message_history)
-                            .await;
-                    } else {
-                        let tool_context = format!("Tool call failed: {}", result.content);
-                        let enhanced_prompt = format!("The user asked: \"{prompt}\" but the tool call failed: {tool_context}. Please provide an appropriate error response.");
-                        return self
-                            .get_llm_response(enhanced_prompt, message_history)
-                            .await;
-                    }
+                    // Pass tool result to LLM for response generation
+                    let tool_context = format!("Tool call result: {}", result.content);
+                    let enhanced_prompt = format!("The user asked: \"{prompt}\" and I retrieved this information: {tool_context}. Please provide a natural response.");
+                    return self
+                        .get_llm_response(enhanced_prompt, message_history)
+                        .await;
                 }
                 Err(e) => {
                     let tool_context = format!("Tool call error: {e}");
@@ -358,10 +350,7 @@ User question: {prompt}");
     }
 
     async fn read_user_info(&self, username: &str) -> String {
-        match read_to_string(format!("users/{username}")) {
-            Ok(content) => content,
-            Err(_) => String::new(),
-        }
+        read_to_string(format!("users/{username}")).unwrap_or_default()
     }
 
     async fn queue_user_update(&self, username: String, old_info: String, chat_context: String) {
@@ -543,8 +532,11 @@ async fn main() {
                 // Add to pending messages before sending
                 let message_id = app.add_pending_message(response.clone()).await;
 
-                conn.send(&response);
-                println!("[DEBUG] Response sent successfully with ID: {message_id}");
+                if let Err(e) = conn.send(&response) {
+                    eprintln!("[DEBUG] Failed to send response: {e}");
+                } else {
+                    println!("[DEBUG] Response sent successfully with ID: {message_id}");
+                }
 
                 // Add bot's response to history
                 app.add_message_to_history(bot_account, &response).await;
@@ -592,7 +584,9 @@ async fn main() {
             app.confirm_message_sent(retry_msg.id, &retry_msg.content)
                 .await; // Remove old entry
 
-            conn.send(&retry_msg.content);
+            if let Err(e) = conn.send(&retry_msg.content) {
+                eprintln!("[DEBUG] Failed to send retry message: {e}");
+            }
 
             // Small delay between retries
             time::sleep(time::Duration::from_millis(100)).await;
