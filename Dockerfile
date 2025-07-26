@@ -11,23 +11,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy source code for installation
 COPY pyproject.toml .
-COPY main.py .
 COPY brok/ ./brok/
 
 # Install the package
-RUN pip install --no-cache-dir --user .
+RUN pip install --no-cache-dir .
 
 # Runtime stage using distroless
-FROM gcr.io/distroless/python3-debian12:latest
+FROM python:3.13-slim as runtime
 
 # Copy the installed packages from builder stage
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder /usr/local /usr/local
 
 # Set working directory
 WORKDIR /app
 
-# Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
+# Make sure scripts in .local are usable and add to Python path
+ENV PATH=/usr/local/bin:$PATH
 
-# Set the entrypoint
+# Default entrypoint uses the brok console script installed by pip
 ENTRYPOINT ["brok"] 
