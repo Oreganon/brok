@@ -15,7 +15,12 @@ from brok.exceptions import ConfigurationError
 from brok.llm.base import LLMConfig, LLMProvider
 from brok.llm.llamacpp import LlamaCppProvider
 from brok.llm.ollama import OllamaProvider
-from brok.prompts import create_custom_template, get_prompt_template, create_custom_xml_template, get_xml_prompt_template
+from brok.prompts import (
+    create_custom_template,
+    create_custom_xml_template,
+    get_prompt_template,
+    get_xml_prompt_template,
+)
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -149,19 +154,20 @@ async def main() -> None:
                     raise ValueError(
                         "custom_system_prompt must be provided when using custom prompt style"
                     )
-                prompt_template = create_custom_xml_template(config.custom_system_prompt)
+                prompt_template = create_custom_xml_template(
+                    config.custom_system_prompt
+                )
             else:
                 prompt_template = get_xml_prompt_template(config.prompt_style)
+        # Use regular PromptTemplate for backward compatibility
+        elif config.prompt_style == "custom":
+            if config.custom_system_prompt is None:
+                raise ValueError(
+                    "custom_system_prompt must be provided when using custom prompt style"
+                )
+            prompt_template = create_custom_template(config.custom_system_prompt)
         else:
-            # Use regular PromptTemplate for backward compatibility
-            if config.prompt_style == "custom":
-                if config.custom_system_prompt is None:
-                    raise ValueError(
-                        "custom_system_prompt must be provided when using custom prompt style"
-                    )
-                prompt_template = create_custom_template(config.custom_system_prompt)
-            else:
-                prompt_template = get_prompt_template(config.prompt_style)
+            prompt_template = get_prompt_template(config.prompt_style)
 
         # Create LLM provider
         llm_config = LLMConfig(

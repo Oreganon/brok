@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import xml.etree.ElementTree as ET
 
 # Import for KEP-002 Increment B structured context
 from typing import TYPE_CHECKING
+import xml.etree.ElementTree as ET
 
 if TYPE_CHECKING:
     from brok.chat import ContextMessage
@@ -95,7 +95,9 @@ class XMLPromptTemplate(PromptTemplate):
             # When XML formatting is disabled, delegate to parent for identical output
             return super().build_prompt(user_input, context, tools_description)
 
-        return self._build_xml_prompt(user_input, context, tools_description, context_messages)
+        return self._build_xml_prompt(
+            user_input, context, tools_description, context_messages
+        )
 
     def _build_xml_prompt(
         self,
@@ -150,7 +152,9 @@ class XMLPromptTemplate(PromptTemplate):
             self._add_structured_context(root, context_messages)
         elif context and context.strip():
             # Legacy string context for backward compatibility
-            context_elem = ET.SubElement(root, "context", window_size="10", format="legacy")
+            context_elem = ET.SubElement(
+                root, "context", window_size="10", format="legacy"
+            )
             context_elem.text = context.strip()
 
         # Add request section
@@ -217,17 +221,14 @@ class XMLPromptTemplate(PromptTemplate):
 
         # Create context element with metadata
         context_elem = ET.SubElement(
-            root, 
-            "context", 
-            window_size=str(len(context_messages)),
-            format="structured"
+            root, "context", window_size=str(len(context_messages)), format="structured"
         )
 
         # Add individual message elements with metadata
         for ctx_msg in context_messages:
             # Determine message type
             msg_type = "bot_response" if ctx_msg.is_bot else "user_message"
-            
+
             # Create message element with attributes
             message_elem = ET.SubElement(
                 context_elem,
@@ -235,9 +236,9 @@ class XMLPromptTemplate(PromptTemplate):
                 sender=ctx_msg.sender,
                 timestamp=ctx_msg.timestamp.isoformat(),
                 type=msg_type,
-                id=ctx_msg.message_id
+                id=ctx_msg.message_id,
             )
-            
+
             # Set message content
             message_elem.text = ctx_msg.content
 
@@ -326,7 +327,7 @@ def get_xml_prompt_template(style: str = "concise") -> XMLPromptTemplate:
     """
     # Get the corresponding base template
     base_template = get_prompt_template(style)
-    
+
     # Create XMLPromptTemplate with same configuration
     return XMLPromptTemplate(
         system_prompt=base_template.system_prompt,

@@ -10,7 +10,7 @@ import aiohttp
 
 from brok.exceptions import LLMConnectionError, LLMGenerationError, LLMTimeoutError
 from brok.llm.base import LLMConfig, LLMMetadata, LLMProvider
-from brok.prompts import PromptTemplate, get_prompt_template, XMLPromptTemplate
+from brok.prompts import PromptTemplate, XMLPromptTemplate, get_prompt_template
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -61,7 +61,10 @@ class OllamaProvider(LLMProvider):
         self._last_metadata: LLMMetadata = {}
 
     async def generate(  # type: ignore[override]
-        self, prompt: str, context: str | None = None, context_messages: list | None = None
+        self,
+        prompt: str,
+        context: str | None = None,
+        context_messages: list | None = None,
     ) -> AsyncGenerator[str]:
         """Generate response from Ollama API.
 
@@ -185,7 +188,9 @@ class OllamaProvider(LLMProvider):
         """
         return self._last_metadata.copy()
 
-    def _build_prompt(self, prompt: str, context: str | None, context_messages: list | None = None) -> str:
+    def _build_prompt(
+        self, prompt: str, context: str | None, context_messages: list | None = None
+    ) -> str:
         """Build the full prompt with optional context and tools using the configured template.
 
         Args:
@@ -197,15 +202,15 @@ class OllamaProvider(LLMProvider):
             str: The complete prompt to send to Ollama
         """
         tools_description = self.get_tools_description() if self.has_tools() else None
-        
+
         # Use structured context with XMLPromptTemplate (KEP-002 Increment B)
         if isinstance(self.prompt_template, XMLPromptTemplate) and context_messages:
             return self.prompt_template.build_prompt(
-                prompt, 
-                context, 
+                prompt,
+                context,
                 tools_description,
                 xml_formatting=True,
-                context_messages=context_messages
+                context_messages=context_messages,
             )
         else:
             # Fallback to legacy string context for backward compatibility

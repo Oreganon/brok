@@ -445,7 +445,9 @@ class ChatBot:
                 try:
                     response_chunks = []
                     async for chunk in self._llm_provider.generate(  # type: ignore[attr-defined]
-                        message.original_message, message.context, message.context_messages
+                        message.original_message,
+                        message.context,
+                        message.context_messages,
                     ):
                         response_chunks.append(chunk)
 

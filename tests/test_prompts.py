@@ -1,9 +1,11 @@
 """Tests for prompt management functionality."""
 
+from datetime import datetime
 import xml.etree.ElementTree as ET
 
 import pytest
 
+from brok.chat import ContextMessage
 from brok.prompts import (
     ADAPTIVE_TEMPLATE,
     CONCISE_TEMPLATE,
@@ -489,9 +491,6 @@ class TestXMLPromptTemplateStructuredContext:
 
     def test_structured_context_creates_individual_message_elements(self):
         """Test that structured context creates individual <message> elements with metadata."""
-        from datetime import datetime
-        from brok.chat import ContextMessage
-        
         # Arrange
         xml_template = XMLPromptTemplate(system_prompt="System")
         context_messages = [
@@ -500,34 +499,35 @@ class TestXMLPromptTemplateStructuredContext:
                 sender="alice",
                 timestamp=datetime(2025, 1, 26, 15, 30, 0),
                 is_bot=False,
-                message_id="msg_1"
+                message_id="msg_1",
             ),
             ContextMessage(
                 content="Hi there!",
                 sender="brok",
                 timestamp=datetime(2025, 1, 26, 15, 30, 15),
                 is_bot=True,
-                message_id="msg_2"
-            )
+                message_id="msg_2",
+            ),
         ]
 
         # Act
         result = xml_template.build_prompt(
-            "How are you?", 
-            xml_formatting=True, 
-            context_messages=context_messages
+            "How are you?", xml_formatting=True, context_messages=context_messages
         )
 
         # Assert
         assert '<context window_size="2" format="structured">' in result
-        assert '<message sender="alice" timestamp="2025-01-26T15:30:00" type="user_message" id="msg_1">Hello world</message>' in result
-        assert '<message sender="brok" timestamp="2025-01-26T15:30:15" type="bot_response" id="msg_2">Hi there!</message>' in result
+        assert (
+            '<message sender="alice" timestamp="2025-01-26T15:30:00" type="user_message" id="msg_1">Hello world</message>'
+            in result
+        )
+        assert (
+            '<message sender="brok" timestamp="2025-01-26T15:30:15" type="bot_response" id="msg_2">Hi there!</message>'
+            in result
+        )
 
     def test_structured_context_preferred_over_string_context(self):
         """Test that structured context is used when both structured and string context are provided."""
-        from datetime import datetime
-        from brok.chat import ContextMessage
-        
         # Arrange
         xml_template = XMLPromptTemplate(system_prompt="System")
         string_context = "alice: Should not appear"
@@ -536,16 +536,16 @@ class TestXMLPromptTemplateStructuredContext:
                 content="Should appear",
                 sender="alice",
                 timestamp=datetime.now(),
-                is_bot=False
+                is_bot=False,
             )
         ]
 
         # Act
         result = xml_template.build_prompt(
-            "Hello", 
+            "Hello",
             context=string_context,
-            xml_formatting=True, 
-            context_messages=context_messages
+            xml_formatting=True,
+            context_messages=context_messages,
         )
 
         # Assert
@@ -562,9 +562,7 @@ class TestXMLPromptTemplateStructuredContext:
 
         # Act
         result = xml_template.build_prompt(
-            "Hello", 
-            context=string_context,
-            xml_formatting=True
+            "Hello", context=string_context, xml_formatting=True
         )
 
         # Assert
@@ -578,10 +576,7 @@ class TestXMLPromptTemplateStructuredContext:
         xml_template = XMLPromptTemplate(system_prompt="System")
 
         # Act
-        result = xml_template.build_prompt(
-            "Hello", 
-            xml_formatting=True
-        )
+        result = xml_template.build_prompt("Hello", xml_formatting=True)
 
         # Assert
         assert "<context" not in result
@@ -593,9 +588,7 @@ class TestXMLPromptTemplateStructuredContext:
 
         # Act
         result = xml_template.build_prompt(
-            "Hello", 
-            xml_formatting=True,
-            context_messages=[]
+            "Hello", xml_formatting=True, context_messages=[]
         )
 
         # Assert
@@ -603,19 +596,6 @@ class TestXMLPromptTemplateStructuredContext:
 
     def test_structured_context_xml_is_well_formed(self):
         """Test that structured context creates well-formed XML."""
-        from datetime import datetime
-        from dataclasses import dataclass, field
-        import time
-        
-        # Define ContextMessage for testing (avoiding import issues)
-        @dataclass
-        class ContextMessage:
-            content: str
-            sender: str
-            timestamp: datetime
-            is_bot: bool
-            message_id: str = field(default_factory=lambda: str(time.time_ns()))
-        
         # Arrange
         xml_template = XMLPromptTemplate(system_prompt="System")
         context_messages = [
@@ -623,15 +603,13 @@ class TestXMLPromptTemplateStructuredContext:
                 content="Test message with <special> & characters",
                 sender="user_with_underscore",
                 timestamp=datetime(2025, 1, 26, 15, 30, 0),
-                is_bot=False
+                is_bot=False,
             )
         ]
 
         # Act
         result = xml_template.build_prompt(
-            "Hello", 
-            xml_formatting=True, 
-            context_messages=context_messages
+            "Hello", xml_formatting=True, context_messages=context_messages
         )
 
         # Assert - This will raise an exception if XML is malformed
@@ -640,7 +618,7 @@ class TestXMLPromptTemplateStructuredContext:
         assert context_elem is not None
         assert context_elem.get("format") == "structured"
         assert context_elem.get("window_size") == "1"
-        
+
         message_elem = context_elem.find("message")
         assert message_elem is not None
         assert message_elem.get("sender") == "user_with_underscore"
@@ -649,9 +627,6 @@ class TestXMLPromptTemplateStructuredContext:
 
     def test_backward_compatibility_with_xml_formatting_disabled(self):
         """Test that structured context parameters don't affect output when XML formatting is disabled."""
-        from datetime import datetime
-        from brok.chat import ContextMessage
-        
         # Arrange
         system_prompt = "You are helpful"
         user_input = "Hello"
@@ -661,7 +636,7 @@ class TestXMLPromptTemplateStructuredContext:
                 content="Should be ignored",
                 sender="alice",
                 timestamp=datetime.now(),
-                is_bot=False
+                is_bot=False,
             )
         ]
 
@@ -671,10 +646,10 @@ class TestXMLPromptTemplateStructuredContext:
         # Act
         base_output = base_template.build_prompt(user_input, string_context)
         xml_output = xml_template.build_prompt(
-            user_input, 
+            user_input,
             context=string_context,
             xml_formatting=False,
-            context_messages=context_messages  # Should be ignored
+            context_messages=context_messages,  # Should be ignored
         )
 
         # Assert - Output should be identical (backward compatibility)

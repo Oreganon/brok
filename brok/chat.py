@@ -490,7 +490,9 @@ class ChatClient:
 
             return "\n".join(self._context_messages_legacy)
 
-    def get_structured_context(self, current_sender: str | None = None) -> list[ContextMessage] | None:
+    def get_structured_context(
+        self, current_sender: str | None = None
+    ) -> list[ContextMessage] | None:
         """Get structured context messages for XMLPromptTemplate (KEP-002 Increment B).
 
         Returns the processed context messages with mention-aware prioritization
