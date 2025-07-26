@@ -161,7 +161,7 @@ class TestChatClient:
                 )
 
     @pytest.mark.asyncio
-    async def test_should_respond_to_pure_keywords(self, chat_client: ChatClient):
+    async def test_should_respond_to_pure_keywords(self, _chat_client: ChatClient):
         """Test message filtering with pure keyword matches that aren't parsed as commands."""
         # Create a client with keywords that won't be parsed as commands
         filters = create_default_filters(["hey", "hello"])
