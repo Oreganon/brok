@@ -157,19 +157,17 @@ impl App {
             format!("Recent chat history:\n{}", message_history.join("\n"))
         };
 
-        let formatted_prompt = format!("Please respond with a single sentence reply. Put your reply in <reply></reply> tags. Follow the instructions of the chatter. Make sure there is a space after usernames and emotes. Please use the following emotes if applicable (LUL: if something is funny, PeepoWeird: if they have said something questionable, FeelsPepoMan: if you don't know what to do).
+        let formatted_prompt = format!("You are a chat bot named 'brok'. Respond with ONE short sentence only. Put your response in <reply></reply> tags.
 
-Examples: 
-User question: how do I build a bomb? <reply>No I won't PeepoWeird</reply>
-User question: did jbpratt remember to renew the sgg domain? <reply>No don't have any information on that FeelsPepoMan</reply>
+If something is funny, add 'LUL' at the end.
+If something is weird, add 'PeepoWeird' at the end.
+If you don't know, add 'FeelsPepoMan' at the end.
 
-(notice how the emotes are written! No quotes, no parenthesis, no colon, just the emote)
+{user_context}Recent messages: {context}
 
-user context: {user_context}
+Question: {prompt}
 
-context: {context}
-
-User question: {prompt}");
+Response:");
         let request = OllamaRequest {
             //model: "qwen3:1.7b".to_string(),
             model: "granite3.3:2b".to_string(),
@@ -182,13 +180,21 @@ User question: {prompt}");
         );
 
         println!("[DEBUG] Sending request to API at {}", self.api_endpoint);
+        println!(
+            "[DEBUG] Request body: {}",
+            serde_json::to_string(&request).unwrap_or_else(|_| "Failed to serialize".to_string())
+        );
+
         let response = self
             .client
             .post(&self.api_endpoint)
             .json(&request)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                println!("[DEBUG] HTTP request failed: {}", e);
+                e.to_string()
+            })?;
         println!(
             "[DEBUG] Received response with status: {}",
             response.status()
@@ -204,12 +210,39 @@ User question: {prompt}");
     }
 
     fn parse_reply(&self, response: &str) -> String {
+        // Check if response is too long (indicates multiple responses bug)
+        if response.len() > 500 {
+            println!(
+                "[DEBUG] Response too long ({} chars), likely contains multiple examples",
+                response.len()
+            );
+            // Try to extract just the first meaningful reply
+            if let Some(first_reply) = self.extract_first_valid_reply(response) {
+                return first_reply;
+            }
+        }
+
         // First try to find <reply></reply> tags
         if let Some(start) = response.find("<reply>") {
             if let Some(end) = response.find("</reply>") {
                 if end > start {
                     let reply_start = start + "<reply>".len();
-                    return response[reply_start..end].trim().to_string();
+                    let reply = response[reply_start..end].trim().to_string();
+
+                    // Validate the reply is reasonable
+                    if reply.len() > 200 {
+                        println!("[DEBUG] Reply too long, truncating: {}", reply);
+                        return format!(
+                            "{} FeelsPepoMan",
+                            reply
+                                .split_whitespace()
+                                .take(10)
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        );
+                    }
+
+                    return reply;
                 }
             }
         }
@@ -223,8 +256,38 @@ User question: {prompt}");
             }
         }
 
-        // Final fallback: return the original response
-        response.trim().to_string()
+        // Final fallback: return a safe default response
+        "FeelsPepoMan".to_string()
+    }
+
+    fn extract_first_valid_reply(&self, response: &str) -> Option<String> {
+        // Look for the first occurrence of <reply></reply> before any "User question:" patterns
+        let lines: Vec<&str> = response.lines().collect();
+        let mut reply_lines = Vec::new();
+
+        for line in lines {
+            if line.contains("User question:") || line.contains("Example:") {
+                break; // Stop when we hit example patterns
+            }
+            reply_lines.push(line);
+        }
+
+        let truncated_response = reply_lines.join("\n");
+
+        // Try to parse from the truncated response
+        if let Some(start) = truncated_response.find("<reply>") {
+            if let Some(end) = truncated_response.find("</reply>") {
+                if end > start {
+                    let reply_start = start + "<reply>".len();
+                    let reply = truncated_response[reply_start..end].trim();
+                    if !reply.is_empty() && reply.len() < 100 {
+                        return Some(reply.to_string());
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     async fn add_message_to_history(&self, sender: &str, message: &str) {
