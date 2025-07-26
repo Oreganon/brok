@@ -44,6 +44,9 @@ class BotConfig:
     prompt_style: str = "concise"  # "concise", "detailed", "adaptive", or "custom"
     custom_system_prompt: str | None = None  # Used when prompt_style is "custom"
 
+    # XML prompt formatting (KEP-002)
+    xml_prompt_formatting: bool = False  # Feature flag for XML-structured prompts
+
     # Connection settings
     max_reconnect_attempts: int = (
         10  # Max consecutive reconnection failures before giving up
@@ -184,6 +187,11 @@ class BotConfig:
                     "CUSTOM_SYSTEM_PROMPT must be provided when PROMPT_STYLE is 'custom'"
                 )
 
+            # Parse XML prompt formatting flag (KEP-002)
+            xml_prompt_formatting = (
+                os.getenv("XML_PROMPT_FORMATTING", "false").lower() == "true"
+            )
+
             return cls(
                 chat_environment=chat_env,
                 jwt_token=os.getenv("STRIMS_JWT"),
@@ -206,6 +214,7 @@ class BotConfig:
                 include_bot_responses=include_bot_responses,
                 prompt_style=prompt_style,
                 custom_system_prompt=custom_system_prompt,
+                xml_prompt_formatting=xml_prompt_formatting,
                 max_reconnect_attempts=max_reconnect_attempts,
                 initial_reconnect_delay=initial_reconnect_delay,
                 max_reconnect_delay=max_reconnect_delay,

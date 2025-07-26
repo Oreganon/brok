@@ -487,3 +487,60 @@ class TestPromptConfiguration:
 
         # Assert
         assert config.llm_max_tokens == 200
+
+
+class TestXMLPromptFormattingConfig:
+    """Test cases for XML prompt formatting configuration (KEP-002)."""
+
+    def test_xml_prompt_formatting_default_false(self):
+        """Test that XML prompt formatting is disabled by default."""
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.xml_prompt_formatting is False
+
+    def test_xml_prompt_formatting_enabled_via_env(self, monkeypatch):
+        """Test enabling XML prompt formatting via environment variable."""
+        # Arrange
+        monkeypatch.setenv("XML_PROMPT_FORMATTING", "true")
+
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.xml_prompt_formatting is True
+
+    @pytest.mark.parametrize(
+        "env_value,expected",
+        [
+            ("true", True),
+            ("TRUE", True),
+            ("True", True),
+            ("false", False),
+            ("FALSE", False),
+            ("False", False),
+            ("", False),  # Empty string defaults to false
+            ("invalid", False),  # Invalid values default to false
+            ("1", False),  # Numeric values default to false
+            ("yes", False),  # Only "true" is accepted
+        ],
+    )
+    def test_xml_prompt_formatting_env_values(self, monkeypatch, env_value, expected):
+        """Test various environment variable values for XML prompt formatting."""
+        # Arrange
+        monkeypatch.setenv("XML_PROMPT_FORMATTING", env_value)
+
+        # Act
+        config = BotConfig.from_env()
+
+        # Assert
+        assert config.xml_prompt_formatting is expected
+
+    def test_xml_prompt_formatting_direct_init(self):
+        """Test direct initialization of XML prompt formatting flag."""
+        # Act
+        config = BotConfig(xml_prompt_formatting=True)
+
+        # Assert
+        assert config.xml_prompt_formatting is True

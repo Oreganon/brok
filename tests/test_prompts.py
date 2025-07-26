@@ -1,5 +1,7 @@
 """Tests for prompt management functionality."""
 
+import xml.etree.ElementTree as ET
+
 import pytest
 
 from brok.prompts import (
@@ -10,6 +12,7 @@ from brok.prompts import (
     DEFAULT_DETAILED_PROMPT,
     DETAILED_TEMPLATE,
     PromptTemplate,
+    XMLPromptTemplate,
     create_custom_template,
     get_prompt_template,
 )
@@ -272,3 +275,210 @@ class TestPromptIntegration:
         assert "Context:" in prompt
         assert "User:" in prompt
         assert "Assistant:" in prompt
+
+
+class TestXMLPromptTemplate:
+    """Test cases for XMLPromptTemplate class (KEP-002)."""
+
+    def test_xml_template_inherits_from_prompt_template(self):
+        """Test that XMLPromptTemplate inherits from PromptTemplate."""
+        # Act
+        xml_template = XMLPromptTemplate(system_prompt="Test system")
+
+        # Assert
+        assert isinstance(xml_template, PromptTemplate)
+        assert xml_template.system_prompt == "Test system"
+        assert xml_template.user_prefix == "User"
+        assert xml_template.assistant_prefix == "Assistant"
+
+    def test_xml_formatting_disabled_identical_to_base_template(self):
+        """Test that XMLPromptTemplate with xml_formatting=False produces identical output to PromptTemplate."""
+        # Arrange
+        system_prompt = "You are a helpful assistant."
+        user_input = "Hello, how are you?"
+        context = "Previous conversation here"
+        tools_desc = "Available tools: weather"
+
+        base_template = PromptTemplate(system_prompt=system_prompt)
+        xml_template = XMLPromptTemplate(system_prompt=system_prompt)
+
+        # Act
+        base_output = base_template.build_prompt(user_input, context, tools_desc)
+        xml_output = xml_template.build_prompt(
+            user_input, context, tools_desc, xml_formatting=False
+        )
+
+        # Assert - This is the critical round-trip test for backward compatibility
+        assert xml_output == base_output
+
+    def test_xml_formatting_disabled_no_context_no_tools(self):
+        """Test XMLPromptTemplate without context or tools produces identical output when XML disabled."""
+        # Arrange
+        system_prompt = "You are brok."
+        user_input = "What is 2+2?"
+
+        base_template = PromptTemplate(system_prompt=system_prompt)
+        xml_template = XMLPromptTemplate(system_prompt=system_prompt)
+
+        # Act
+        base_output = base_template.build_prompt(user_input)
+        xml_output = xml_template.build_prompt(user_input, xml_formatting=False)
+
+        # Assert
+        assert xml_output == base_output
+
+    def test_xml_formatting_enabled_creates_structured_xml(self):
+        """Test that XMLPromptTemplate with xml_formatting=True creates structured XML."""
+        # Arrange
+        xml_template = XMLPromptTemplate(
+            system_prompt="You are brok", user_prefix="Human", assistant_prefix="AI"
+        )
+        user_input = "Hello"
+
+        # Act
+        result = xml_template.build_prompt(user_input, xml_formatting=True)
+
+        # Assert
+        assert result.startswith('<prompt version="1.0">')
+        assert '<system role="assistant" name="brok">You are brok</system>' in result
+        assert "<user_input>Hello</user_input>" in result
+        assert "<response_prompt>AI:</response_prompt>" in result
+        assert "</prompt>" in result
+
+    def test_xml_formatting_with_context(self):
+        """Test XML formatting includes context section."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+        context = "Previous chat messages"
+
+        # Act
+        result = xml_template.build_prompt(
+            "Hello", context=context, xml_formatting=True
+        )
+
+        # Assert
+        assert '<context window_size="10">Previous chat messages</context>' in result
+
+    def test_xml_formatting_with_tools(self):
+        """Test XML formatting includes tools section with description and usage."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+        tools_desc = "weather tool for checking weather"
+
+        # Act
+        result = xml_template.build_prompt(
+            "Hello", tools_description=tools_desc, xml_formatting=True
+        )
+
+        # Assert
+        assert '<tools count="1">' in result
+        assert "<description>weather tool for checking weather</description>" in result
+        assert "<usage_instructions>" in result
+        assert "You can use tools by responding in this format:" in result
+
+    def test_xml_formatting_with_all_sections(self):
+        """Test XML formatting with system, tools, context, and request sections."""
+        # Arrange
+        xml_template = XMLPromptTemplate(
+            system_prompt="You are helpful",
+            user_prefix="User",
+            assistant_prefix="Assistant",
+        )
+        context = "Chat history here"
+        tools_desc = "Available tools"
+        user_input = "What's the weather?"
+
+        # Act
+        result = xml_template.build_prompt(
+            user_input,
+            context=context,
+            tools_description=tools_desc,
+            xml_formatting=True,
+        )
+
+        # Assert
+        # Check all sections are present
+        assert '<system role="assistant" name="brok">You are helpful</system>' in result
+        assert '<tools count="1">' in result
+        assert '<context window_size="10">Chat history here</context>' in result
+        assert '<request sender="user">' in result
+        assert "<user_input>What's the weather?</user_input>" in result
+        assert "<response_prompt>Assistant:</response_prompt>" in result
+
+    def test_xml_formatting_handles_empty_system_prompt(self):
+        """Test XML formatting handles empty system prompt gracefully."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="   \n  ")
+
+        # Act
+        result = xml_template.build_prompt("Hello", xml_formatting=True)
+
+        # Assert
+        assert "<system" not in result  # No system section should be created
+        assert "<user_input>Hello</user_input>" in result
+
+    def test_xml_formatting_handles_empty_context(self):
+        """Test XML formatting handles empty context gracefully."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+
+        # Act
+        result = xml_template.build_prompt(
+            "Hello", context="   \n  ", xml_formatting=True
+        )
+
+        # Assert
+        assert "<context" not in result  # No context section should be created
+
+    def test_xml_formatting_handles_empty_tools(self):
+        """Test XML formatting handles empty tools description gracefully."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+
+        # Act
+        result = xml_template.build_prompt(
+            "Hello", tools_description="   ", xml_formatting=True
+        )
+
+        # Assert
+        assert "<tools" not in result  # No tools section should be created
+
+    def test_xml_output_is_well_formed(self):
+        """Test that XML output is well-formed and can be parsed."""
+        # Arrange
+        xml_template = XMLPromptTemplate(system_prompt="System")
+
+        # Act
+        result = xml_template.build_prompt("Hello", xml_formatting=True)
+
+        # Assert - This will raise an exception if XML is malformed
+        root = ET.fromstring(result)
+        assert root.tag == "prompt"
+        assert root.get("version") == "1.0"
+
+    @pytest.mark.parametrize(
+        "system_prompt,user_input,context,tools_desc",
+        [
+            ("System 1", "Input 1", None, None),
+            ("System 2", "Input 2", "Context", None),
+            ("System 3", "Input 3", None, "Tools"),
+            ("System 4", "Input 4", "Context", "Tools"),
+            ("", "Input 5", "Context", "Tools"),  # Empty system
+        ],
+    )
+    def test_backward_compatibility_parametrized(
+        self, system_prompt, user_input, context, tools_desc
+    ):
+        """Parametrized test ensuring backward compatibility across various input combinations."""
+        # Arrange
+        base_template = PromptTemplate(system_prompt=system_prompt)
+        xml_template = XMLPromptTemplate(system_prompt=system_prompt)
+
+        # Act
+        base_output = base_template.build_prompt(user_input, context, tools_desc)
+        xml_output = xml_template.build_prompt(
+            user_input, context, tools_desc, xml_formatting=False
+        )
+
+        # Assert
+        assert xml_output == base_output
