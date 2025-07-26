@@ -222,19 +222,22 @@ class LlamaCppProvider(LLMProvider):
         Returns:
             str: The complete prompt to send to LlamaCpp
         """
-        tools_description = self.get_tools_description() if self.has_tools() else None
-
-        # Use structured context with XMLPromptTemplate (KEP-002 Increment B)
-        if isinstance(self.prompt_template, XMLPromptTemplate) and context_messages:
+        # Use structured tools with XMLPromptTemplate (KEP-002 Increment C)
+        if isinstance(self.prompt_template, XMLPromptTemplate):
+            tool_schemas = self.get_tools_schema() if self.has_tools() else None
             return self.prompt_template.build_prompt(
                 prompt,
                 context,
-                tools_description,
+                tools_description=None,  # Use structured tools instead
                 xml_formatting=True,
                 context_messages=context_messages,
+                tool_schemas=tool_schemas,
             )
         else:
-            # Fallback to legacy string context for backward compatibility
+            # Legacy format for non-XML templates
+            tools_description = (
+                self.get_tools_description() if self.has_tools() else None
+            )
             return self.prompt_template.build_prompt(prompt, context, tools_description)
 
     async def close(self) -> None:

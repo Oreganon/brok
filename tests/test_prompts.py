@@ -1,11 +1,14 @@
 """Tests for prompt management functionality."""
 
 from datetime import datetime
+from typing import Any, ClassVar
 import xml.etree.ElementTree as ET
 
 import pytest
 
 from brok.chat import ContextMessage
+from brok.llm.base import LLMConfig
+from brok.llm.ollama import OllamaProvider
 from brok.prompts import (
     ADAPTIVE_TEMPLATE,
     CONCISE_TEMPLATE,
@@ -18,6 +21,8 @@ from brok.prompts import (
     create_custom_template,
     get_prompt_template,
 )
+from brok.tools.base import BaseTool, ToolExecutionResult
+from brok.tools.registry import ToolRegistry
 
 
 class TestPromptTemplate:
@@ -835,3 +840,62 @@ class TestXMLPromptTemplateStructuredTools:
             ET.fromstring(result)
         except ET.ParseError as e:
             pytest.fail(f"Generated XML is not well-formed: {e}")
+
+
+class TestStructuredToolsIntegration:
+    """Integration tests for structured tools with LLM providers (KEP-002 Increment C)."""
+
+    def test_llm_provider_get_tools_schema_integration(self):
+        """Test integration between ToolRegistry, LLMProvider, and XMLPromptTemplate."""
+        # Create a simple test tool
+        class TestTool(BaseTool):
+            name: ClassVar[str] = "test_tool"
+            description: ClassVar[str] = "A test tool for integration testing"
+            parameters: ClassVar[dict[str, Any]] = {
+                "type": "object",
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "Test input parameter",
+                    }
+                },
+                "required": ["input"],
+            }
+
+            async def execute(self, **_kwargs: Any) -> ToolExecutionResult:
+                return ToolExecutionResult(success=True, data="Test result")
+
+        # Set up tool registry
+        registry = ToolRegistry()
+        registry.register_tool(TestTool())
+
+        # Create Ollama provider with XML template
+        config = LLMConfig(
+            model_name="test-model", max_tokens=100, temperature=0.7, timeout_seconds=30
+        )
+        xml_template = XMLPromptTemplate(system_prompt="Test system")
+        provider = OllamaProvider(
+            "http://localhost:11434", "test-model", config, xml_template
+        )
+        provider.set_tool_registry(registry)
+
+        # Test that provider can get structured tools
+        tool_schemas = provider.get_tools_schema()
+
+        # Verify structure
+        assert len(tool_schemas) == 1
+        assert tool_schemas[0]["name"] == "test_tool"
+        assert tool_schemas[0]["description"] == "A test tool for integration testing"
+        assert "parameters" in tool_schemas[0]
+
+        # Test prompt building with structured tools
+        prompt = provider._build_prompt("Test input", None, None)
+
+        # Verify XML structure includes structured tools
+        assert '<tools count="1">' in prompt
+        assert '<tool name="test_tool">' in prompt
+        assert (
+            "<description>A test tool for integration testing</description>" in prompt
+        )
+        assert '<parameter name="input" type="string" required="true">' in prompt
+        assert "Test input parameter" in prompt

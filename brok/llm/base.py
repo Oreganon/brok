@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -134,3 +134,13 @@ class LLMProvider(ABC):
         if self.has_tools():
             return self.tool_registry.get_tools_description()
         return ""
+
+    def get_tools_schema(self) -> list[dict[str, Any]]:
+        """Get structured schema for available tools (KEP-002 Increment C).
+
+        Returns:
+            list[dict]: List of tool schemas for structured XML prompts
+        """
+        if self.has_tools():
+            return self.tool_registry.get_tools_schema()
+        return []
