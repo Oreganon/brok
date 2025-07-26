@@ -5,6 +5,55 @@ use tokio::sync::{mpsc, Mutex};
 
 use crate::tools::ToolManager;
 
+// Custom error type for better error handling
+#[derive(Debug, Clone)]
+pub enum InferenceError {
+    Network(String),
+    Parse(String),
+    Provider(String),
+    Tool(String),
+}
+
+impl std::fmt::Display for InferenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InferenceError::Network(msg) => write!(f, "Network error: {msg}"),
+            InferenceError::Parse(msg) => write!(f, "Parse error: {msg}"),
+            InferenceError::Provider(msg) => write!(f, "Provider error: {msg}"),
+            InferenceError::Tool(msg) => write!(f, "Tool error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for InferenceError {}
+
+// Common prompt template to avoid duplication
+fn format_chat_prompt(
+    prompt: String,
+    message_history: &[String],
+    user_context: Option<&str>,
+) -> String {
+    let context = if message_history.is_empty() {
+        "No previous messages.".to_string()
+    } else {
+        format!("Recent chat history:\n{}", message_history.join("\n"))
+    };
+
+    let user_info = user_context.unwrap_or("");
+
+    format!("You are a chat bot named 'brok'. Respond with ONE short sentence only. Put your response in <reply></reply> tags.
+
+If something is funny, add 'LUL' at the end.
+If something is weird, add 'PeepoWeird' at the end.
+If you don't know, add 'FeelsPepoMan' at the end.
+
+{user_info}Recent messages: {context}
+
+Question: {prompt}
+
+Response:")
+}
+
 #[derive(Debug, Clone)]
 pub struct InferenceRequest {
     pub prompt: String,
@@ -25,7 +74,8 @@ pub trait InferenceProvider: Send + Sync {
         &self,
         prompt: String,
         message_history: &[String],
-    ) -> Result<String, String>;
+        user_context: Option<&str>,
+    ) -> Result<String, InferenceError>;
 }
 
 // Ollama API structures
@@ -94,24 +144,9 @@ impl InferenceProvider for OllamaProvider {
         &self,
         prompt: String,
         message_history: &[String],
-    ) -> Result<String, String> {
-        let context = if message_history.is_empty() {
-            "No previous messages.".to_string()
-        } else {
-            format!("Recent chat history:\n{}", message_history.join("\n"))
-        };
-
-        let formatted_prompt = format!("You are a chat bot named 'brok'. Respond with ONE short sentence only. Put your response in <reply></reply> tags.
-
-If something is funny, add 'LUL' at the end.
-If something is weird, add 'PeepoWeird' at the end.
-If you don't know, add 'FeelsPepoMan' at the end.
-
-Recent messages: {context}
-
-Question: {prompt}
-
-Response:");
+        user_context: Option<&str>,
+    ) -> Result<String, InferenceError> {
+        let formatted_prompt = format_chat_prompt(prompt, message_history, user_context);
 
         let request = OllamaRequest {
             model: self.model.clone(),
@@ -136,7 +171,7 @@ Response:");
             .await
             .map_err(|e| {
                 println!("[DEBUG] HTTP request failed: {e}");
-                e.to_string()
+                InferenceError::Network(e.to_string())
             })?;
 
         println!(
@@ -144,7 +179,17 @@ Response:");
             response.status()
         );
 
-        let ollama_response: OllamaResponse = response.json().await.map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(InferenceError::Provider(format!(
+                "Ollama API returned status: {}",
+                response.status()
+            )));
+        }
+
+        let ollama_response: OllamaResponse = response
+            .json()
+            .await
+            .map_err(|e| InferenceError::Parse(e.to_string()))?;
         println!("[DEBUG] Ollama response: {}", ollama_response.response);
 
         Ok(ollama_response.response)
@@ -173,24 +218,9 @@ impl InferenceProvider for LlamaCppProvider {
         &self,
         prompt: String,
         message_history: &[String],
-    ) -> Result<String, String> {
-        let context = if message_history.is_empty() {
-            "No previous messages.".to_string()
-        } else {
-            format!("Recent chat history:\n{}", message_history.join("\n"))
-        };
-
-        let formatted_prompt = format!("You are a chat bot named 'brok'. Respond with ONE short sentence only. Put your response in <reply></reply> tags.
-
-If something is funny, add 'LUL' at the end.
-If something is weird, add 'PeepoWeird' at the end.
-If you don't know, add 'FeelsPepoMan' at the end.
-
-Recent messages: {context}
-
-Question: {prompt}
-
-Response:");
+        user_context: Option<&str>,
+    ) -> Result<String, InferenceError> {
+        let formatted_prompt = format_chat_prompt(prompt, message_history, user_context);
 
         let request = LlamaCppRequest {
             prompt: formatted_prompt,
@@ -220,7 +250,7 @@ Response:");
             .await
             .map_err(|e| {
                 println!("[DEBUG] HTTP request failed: {e}");
-                e.to_string()
+                InferenceError::Network(e.to_string())
             })?;
 
         println!(
@@ -228,8 +258,17 @@ Response:");
             response.status()
         );
 
-        let llamacpp_response: LlamaCppResponse =
-            response.json().await.map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(InferenceError::Provider(format!(
+                "llama.cpp API returned status: {}",
+                response.status()
+            )));
+        }
+
+        let llamacpp_response: LlamaCppResponse = response
+            .json()
+            .await
+            .map_err(|e| InferenceError::Parse(e.to_string()))?;
         println!("[DEBUG] llama.cpp response: {}", llamacpp_response.content);
 
         Ok(llamacpp_response.content)
@@ -238,12 +277,12 @@ Response:");
 
 // Inference manager that handles tool calls and AI responses
 pub struct InferenceManager {
-    provider: Box<dyn InferenceProvider>,
+    provider: Arc<dyn InferenceProvider>,
     tool_manager: ToolManager,
 }
 
 impl InferenceManager {
-    pub fn new(provider: Box<dyn InferenceProvider>, tool_manager: ToolManager) -> Self {
+    pub fn new(provider: Arc<dyn InferenceProvider>, tool_manager: ToolManager) -> Self {
         Self {
             provider,
             tool_manager,
@@ -255,7 +294,7 @@ impl InferenceManager {
         prompt: String,
         message_history: &[String],
         user_context: Option<String>,
-    ) -> Result<String, String> {
+    ) -> Result<String, InferenceError> {
         println!("[DEBUG] Getting AI response for prompt: {prompt}");
 
         // Check if this is a tool call
@@ -272,11 +311,7 @@ impl InferenceManager {
                         .await;
                 }
                 Err(e) => {
-                    let tool_context = format!("Tool call error: {e}");
-                    let enhanced_prompt = format!("The user asked: \"{prompt}\" but I encountered an error: {tool_context}. Please provide an appropriate error response.");
-                    return self
-                        .get_llm_response(enhanced_prompt, message_history, user_context)
-                        .await;
+                    return Err(InferenceError::Tool(e.to_string()));
                 }
             }
         }
@@ -290,17 +325,12 @@ impl InferenceManager {
         prompt: String,
         message_history: &[String],
         user_context: Option<String>,
-    ) -> Result<String, String> {
-        // Add user context if provided
-        let enhanced_prompt = if let Some(context) = user_context {
-            format!("{context}\n\nQuestion: {prompt}")
-        } else {
-            prompt
-        };
+    ) -> Result<String, InferenceError> {
+        let user_context_str = user_context.as_deref();
 
         let response = self
             .provider
-            .generate_response(enhanced_prompt, message_history)
+            .generate_response(prompt, message_history, user_context_str)
             .await?;
 
         // Parse the reply from <reply></reply> tags
@@ -332,14 +362,18 @@ impl InferenceManager {
                     // Validate the reply is reasonable
                     if reply.len() > 200 {
                         println!("[DEBUG] Reply too long, truncating: {reply}");
-                        return format!(
-                            "{} FeelsPepoMan",
-                            reply
-                                .split_whitespace()
-                                .take(10)
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        );
+                        let truncated = reply
+                            .split_whitespace()
+                            .take(10)
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        // Ensure we don't exceed limit when adding suffix
+                        let max_len = 200 - " FeelsPepoMan".len();
+                        if truncated.len() > max_len {
+                            return format!("{} FeelsPepoMan", &truncated[..max_len]);
+                        } else {
+                            return format!("{truncated} FeelsPepoMan");
+                        }
                     }
 
                     return reply;
@@ -397,42 +431,59 @@ pub async fn inference_worker(
     inference_manager: Arc<InferenceManager>,
     message_history: Arc<Mutex<Vec<String>>>,
     available_users: Arc<Mutex<std::collections::HashSet<String>>>,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     println!("[DEBUG] Inference worker started");
 
-    while let Some(request) = inference_rx.recv().await {
-        println!(
-            "[DEBUG] Processing inference request from: {}",
-            request.sender
-        );
+    loop {
+        tokio::select! {
+            request = inference_rx.recv() => {
+                match request {
+                    Some(request) => {
+                        println!(
+                            "[DEBUG] Processing inference request from: {}",
+                            request.sender
+                        );
 
-        // Get current message history
-        let history = {
-            let history_guard = message_history.lock().await;
-            history_guard.clone()
-        };
+                        // Get current message history
+                        let history = {
+                            let history_guard = message_history.lock().await;
+                            history_guard.clone()
+                        };
 
-        // Detect users in the prompt and get their info
-        let user_context = get_user_context(&request.prompt, available_users.clone()).await;
+                        // Detect users in the prompt and get their info
+                        let user_context = get_user_context(&request.prompt, available_users.clone()).await;
 
-        // Process inference
-        match inference_manager
-            .get_ai_response(request.prompt, &history, user_context)
-            .await
-        {
-            Ok(response) => {
-                println!("[DEBUG] Inference completed, sending response");
-                if let Err(e) = request.response_tx.send(response) {
-                    eprintln!("[DEBUG] Failed to send response: {e}");
+                        // Process inference
+                        match inference_manager
+                            .get_ai_response(request.prompt, &history, user_context)
+                            .await
+                        {
+                            Ok(response) => {
+                                println!("[DEBUG] Inference completed, sending response");
+                                if let Err(e) = request.response_tx.send(response) {
+                                    eprintln!("[DEBUG] Failed to send response: {e}");
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[DEBUG] Inference failed: {e}");
+                                let error_response =
+                                    "Sorry, I encountered an error processing your request.".to_string();
+                                if let Err(e) = request.response_tx.send(error_response) {
+                                    eprintln!("[DEBUG] Failed to send error response: {e}");
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        println!("[DEBUG] Inference channel closed, stopping worker");
+                        break;
+                    }
                 }
             }
-            Err(e) => {
-                eprintln!("[DEBUG] Inference failed: {e}");
-                let error_response =
-                    "Sorry, I encountered an error processing your request.".to_string();
-                if let Err(e) = request.response_tx.send(error_response) {
-                    eprintln!("[DEBUG] Failed to send error response: {e}");
-                }
+            _ = &mut shutdown_rx => {
+                println!("[DEBUG] Received shutdown signal, stopping inference worker");
+                break;
             }
         }
     }
@@ -445,7 +496,7 @@ async fn get_user_context(
     prompt: &str,
     available_users: Arc<Mutex<std::collections::HashSet<String>>>,
 ) -> Option<String> {
-    use std::fs::read_to_string;
+    use tokio::fs::read_to_string;
 
     let users = available_users.lock().await;
     let mut detected_users = Vec::new();
@@ -464,7 +515,9 @@ async fn get_user_context(
     user_context.push_str("User information:\n");
 
     for username in &detected_users {
-        let user_info = read_to_string(format!("users/{username}")).unwrap_or_default();
+        let user_info = read_to_string(format!("users/{username}"))
+            .await
+            .unwrap_or_default();
         if !user_info.trim().is_empty() {
             user_context.push_str(&format!("{username}: {user_info}\n"));
         } else {
@@ -481,12 +534,12 @@ pub fn create_provider(
     client: Client,
     api_host: String,
     model: Option<String>,
-) -> Box<dyn InferenceProvider> {
+) -> Arc<dyn InferenceProvider> {
     match provider_type {
         ProviderType::Ollama => {
             let model = model.unwrap_or_else(|| "granite3.3:2b".to_string());
-            Box::new(OllamaProvider::new(client, api_host, model))
+            Arc::new(OllamaProvider::new(client, api_host, model))
         }
-        ProviderType::LlamaCpp => Box::new(LlamaCppProvider::new(client, api_host)),
+        ProviderType::LlamaCpp => Arc::new(LlamaCppProvider::new(client, api_host)),
     }
 }

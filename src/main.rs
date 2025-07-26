@@ -1,7 +1,7 @@
 use clap::Parser;
 use reqwest::Client;
 use std::collections::HashSet;
-use std::fs::{read_dir, read_to_string, write};
+use std::fs::{read_dir, read_to_string};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time;
@@ -201,7 +201,9 @@ impl App {
     }
 
     async fn read_user_info(&self, username: &str) -> String {
-        read_to_string(format!("users/{username}")).unwrap_or_default()
+        tokio::fs::read_to_string(format!("users/{username}"))
+            .await
+            .unwrap_or_default()
     }
 
     async fn queue_user_update(&self, username: String, old_info: String, chat_context: String) {
@@ -220,14 +222,19 @@ impl App {
 async fn user_update_worker(
     mut user_update_rx: mpsc::UnboundedReceiver<UserUpdateRequest>,
     inference_manager: Arc<InferenceManager>,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     println!("[DEBUG] User update worker started");
 
-    while let Some(request) = user_update_rx.recv().await {
-        println!("[DEBUG] Processing user update for: {}", request.username);
+    loop {
+        tokio::select! {
+            request = user_update_rx.recv() => {
+                match request {
+                    Some(request) => {
+                        println!("[DEBUG] Processing user update for: {}", request.username);
 
-        let update_prompt = format!(
-            "This is the info for {}. Only add information about {} to this file. Update the user information based on the recent chat context. Return only the updated user information in a concise format.
+                        let update_prompt = format!(
+                            "This is the info for {}. Only add information about {} to this file. Update the user information based on the recent chat context. Return only the updated user information in a concise format.
 
 Old user info for {}: {}
 
@@ -239,36 +246,48 @@ Recent chat context:
 The new user information for {} should be 5 sentences at max.
 
 Please provide updated user information for {} only:", 
-            request.username,
-            request.username,
-            request.username,
-            if request.old_info.trim().is_empty() { "No previous information" } else { &request.old_info },
-            request.chat_context,
-            request.username,
-            request.username
-        );
+                            request.username,
+                            request.username,
+                            request.username,
+                            if request.old_info.trim().is_empty() { "No previous information" } else { &request.old_info },
+                            request.chat_context,
+                            request.username,
+                            request.username
+                        );
 
-        match inference_manager
-            .get_ai_response(update_prompt, &[], None)
-            .await
-        {
-            Ok(updated_info) => {
-                // Write the updated info back to the user file
-                let file_path = format!("users/{}", request.username);
-                if let Err(e) = write(&file_path, updated_info.trim()) {
-                    eprintln!(
-                        "[DEBUG] Failed to write user info for {}: {}",
-                        request.username, e
-                    );
-                } else {
-                    println!("[DEBUG] Updated user info for: {}", request.username);
+                        match inference_manager
+                            .get_ai_response(update_prompt, &[], None)
+                            .await
+                        {
+                            Ok(updated_info) => {
+                                // Write the updated info back to the user file using tokio::fs
+                                let file_path = format!("users/{}", request.username);
+                                if let Err(e) = tokio::fs::write(&file_path, updated_info.trim()).await {
+                                    eprintln!(
+                                        "[DEBUG] Failed to write user info for {}: {}",
+                                        request.username, e
+                                    );
+                                } else {
+                                    println!("[DEBUG] Updated user info for: {}", request.username);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[DEBUG] Failed to get updated user info for {}: {}",
+                                    request.username, e
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        println!("[DEBUG] User update channel closed, stopping worker");
+                        break;
+                    }
                 }
             }
-            Err(e) => {
-                eprintln!(
-                    "[DEBUG] Failed to get updated user info for {}: {}",
-                    request.username, e
-                );
+            _ = &mut shutdown_rx => {
+                println!("[DEBUG] Received shutdown signal, stopping user update worker");
+                break;
             }
         }
     }
@@ -299,6 +318,12 @@ async fn main() {
         }
     };
 
+    // Validate model flag usage
+    if matches!(provider_type, ProviderType::LlamaCpp) && args.model.is_some() {
+        eprintln!("[WARNING] --model flag is ignored for llama-cpp provider");
+        eprintln!("[WARNING] llama.cpp server serves a single pre-loaded model");
+    }
+
     println!("[DEBUG] Using provider: {provider_type:?}");
 
     let app = Arc::new(App::new(inference_tx, user_update_tx));
@@ -312,27 +337,46 @@ async fn main() {
     let client = Client::new();
     let tool_manager = ToolManager::new(client.clone());
     let provider = create_provider(provider_type, client, args.api_host.clone(), args.model);
-    let inference_manager = Arc::new(InferenceManager::new(provider, tool_manager));
+    let inference_manager = InferenceManager::new(provider, tool_manager);
+    let inference_manager = Arc::new(inference_manager);
+
+    // Create shutdown channels
+    let (inference_shutdown_tx, inference_shutdown_rx) = tokio::sync::oneshot::channel();
+    let (user_shutdown_tx, user_shutdown_rx) = tokio::sync::oneshot::channel();
 
     // Start inference worker
     let message_history = Arc::clone(&app.message_history);
     let available_users = Arc::clone(&app.available_users);
     let inference_manager_clone = Arc::clone(&inference_manager);
-    tokio::spawn(async move {
+    let inference_handle = tokio::spawn(async move {
         inference_worker(
             inference_rx,
             inference_manager_clone,
             message_history,
             available_users,
+            inference_shutdown_rx,
         )
         .await;
     });
 
     // Start user update worker
     let user_inference_manager = Arc::clone(&inference_manager);
-    tokio::spawn(async move {
-        user_update_worker(user_update_rx, user_inference_manager).await;
+    let user_handle = tokio::spawn(async move {
+        user_update_worker(user_update_rx, user_inference_manager, user_shutdown_rx).await;
     });
+
+    // Setup signal handling for Linux
+    let shutdown_signal = async {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler");
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .expect("Failed to install SIGINT handler");
+
+        tokio::select! {
+            _ = sigterm.recv() => println!("[DEBUG] Received SIGTERM"),
+            _ = sigint.recv() => println!("[DEBUG] Received SIGINT"),
+        }
+    };
 
     println!("[DEBUG] Reading cookie from: {}", args.cookie);
     let cookie: String = read_to_string(args.cookie).unwrap().parse().unwrap();
@@ -352,7 +396,23 @@ async fn main() {
     // Store pending responses to handle them asynchronously
     let mut pending_responses: Vec<(mpsc::UnboundedReceiver<String>, String)> = Vec::new();
 
-    loop {
+    // Run main loop with shutdown handling
+    tokio::select! {
+        _ = shutdown_signal => {
+            println!("[DEBUG] Shutdown signal received, stopping workers...");
+
+            // Send shutdown signals to workers
+            let _ = inference_shutdown_tx.send(());
+            let _ = user_shutdown_tx.send(());
+
+            // Wait for workers to finish
+            let _ = tokio::join!(inference_handle, user_handle);
+
+            println!("[DEBUG] All workers stopped, exiting");
+            return;
+        }
+        _ = async {
+            loop {
         // Check for completed inferences first
         let mut completed_indices = Vec::new();
         let mut processed_messages = Vec::new(); // Store the original messages that were processed
@@ -473,5 +533,7 @@ async fn main() {
                 time::sleep(time::Duration::from_millis(10)).await;
             }
         }
+    }
+        } => {}
     }
 }
