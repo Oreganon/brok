@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 import os
 
 from brok.exceptions import ConfigurationError
@@ -161,6 +162,15 @@ class BotConfig:
                 os.getenv("INCLUDE_BOT_RESPONSES", "true").lower() == "true"
             )
 
+            # Validate enhanced context configuration (KEP-001 Increment C)
+            cls._validate_enhanced_context_config(
+                enhanced_context,
+                max_context_tokens,
+                context_window_size,
+                prioritize_mentions,
+                include_bot_responses,
+            )
+
             # Parse prompt configuration
             prompt_style = os.getenv("PROMPT_STYLE", "concise").lower()
             if prompt_style not in ("concise", "detailed", "adaptive", "custom"):
@@ -206,6 +216,66 @@ class BotConfig:
             )
         except ValueError as e:
             raise ConfigurationError(f"Invalid configuration value: {e}") from e
+
+    @classmethod
+    def _validate_enhanced_context_config(
+        cls,
+        enhanced_context: bool,
+        max_context_tokens: int,
+        context_window_size: int,
+        prioritize_mentions: bool,
+        include_bot_responses: bool,
+    ) -> None:
+        """Validate enhanced context configuration for KEP-001 Increment C.
+
+        Args:
+            enhanced_context: Whether enhanced context is enabled
+            max_context_tokens: Maximum tokens for context
+            context_window_size: Window size for message history
+            prioritize_mentions: Whether to prioritize mentions
+            include_bot_responses: Whether to include bot responses
+
+        Raises:
+            ConfigurationError: When configuration values are invalid
+        """
+        # Validate token limits
+        if max_context_tokens < 10:
+            raise ConfigurationError(
+                f"MAX_CONTEXT_TOKENS must be at least 10, got: {max_context_tokens}"
+            )
+
+        if max_context_tokens > 10000:
+            raise ConfigurationError(
+                f"MAX_CONTEXT_TOKENS should not exceed 10000 for performance, got: {max_context_tokens}"
+            )
+
+        # Validate context window size bounds
+        if context_window_size < 1:
+            raise ConfigurationError(
+                f"CONTEXT_WINDOW_SIZE must be at least 1, got: {context_window_size}"
+            )
+
+        if context_window_size > 1000:
+            raise ConfigurationError(
+                f"CONTEXT_WINDOW_SIZE should not exceed 1000 for memory efficiency, got: {context_window_size}"
+            )
+
+        # Warn about potential performance issues if enhanced context is disabled
+        # but large window size is configured
+        if not enhanced_context and context_window_size > 50:
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Enhanced context disabled but large window size ({context_window_size}) configured. "
+                "Consider enabling enhanced context for better performance with large windows."
+            )
+
+        # Validate logical configuration combinations
+        if enhanced_context and not include_bot_responses and not prioritize_mentions:
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Enhanced context enabled but both bot responses and mention prioritization disabled. "
+                "This may result in limited context utility."
+            )
 
     @staticmethod
     def _parse_positive_int(env_var: str, default: str) -> int:

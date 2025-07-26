@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 import logging
+import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -402,6 +403,10 @@ class ChatClient:
                 f"Added to enhanced context: {sender}: {message} (is_bot={is_bot}, "
                 f"window size: {len(self._context_messages_structured)})"
             )
+
+            # Log memory usage periodically (KEP-001 Increment C)
+            if len(self._context_messages_structured) % 10 == 0:
+                self._log_context_memory_usage()
         else:
             # Legacy context mode - maintain backward compatibility
             formatted = f"{sender}: {message}"
@@ -415,11 +420,18 @@ class ChatClient:
                 f"Added to legacy context: {formatted} (window size: {len(self._context_messages_legacy)})"
             )
 
+            # Log memory usage periodically for legacy mode too
+            if len(self._context_messages_legacy) % 20 == 0:
+                self._log_context_memory_usage()
+
     def get_context(self, current_sender: str | None = None) -> str | None:
         """Get current conversation context with mention-aware prioritization.
 
         Implements KEP-001 Increment B by prioritizing messages from users who
         mention the bot and applying token-based context limits.
+
+        Optimized for performance in KEP-001 Increment C with efficient string
+        operations and minimal memory allocations.
 
         Args:
             current_sender: Username of current message sender for prioritization
@@ -428,16 +440,17 @@ class ChatClient:
             str | None: Formatted context or None if no context available
         """
         if self._enhanced_context:
-            # Enhanced context mode (KEP-001 Increment B)
+            # Enhanced context mode (KEP-001 Increment B + C optimization)
             if not self._context_messages_structured:
                 return None
 
-            # Filter messages based on include_bot_responses setting
-            filtered_messages = []
-            for ctx_msg in self._context_messages_structured:
-                if not self._include_bot_responses and ctx_msg.is_bot:
-                    continue
-                filtered_messages.append(ctx_msg)
+            # Filter messages efficiently using list comprehension (Increment C optimization)
+            if self._include_bot_responses:
+                filtered_messages = list(self._context_messages_structured)
+            else:
+                filtered_messages = [
+                    msg for msg in self._context_messages_structured if not msg.is_bot
+                ]
 
             if not filtered_messages:
                 return None
@@ -448,21 +461,26 @@ class ChatClient:
                     filtered_messages, current_sender
                 )
             else:
-                # Just use chronological order (most recent first)
+                # Use reversed view for efficiency instead of list creation
                 prioritized_messages = list(reversed(filtered_messages))
 
             # Apply token-based context limiting
             context_messages = self._apply_token_limit(prioritized_messages)
 
-            # Format messages with enhanced sender attribution
-            formatted_messages = []
+            # Optimized string formatting (KEP-001 Increment C)
+            # Pre-compute bot prefix to avoid repeated checks and string operations
+            formatted_parts = []
             for ctx_msg in context_messages:
-                prefix = "🤖 " if ctx_msg.is_bot else ""
-                formatted_messages.append(
-                    f"{prefix}{ctx_msg.sender}: {ctx_msg.content}"
+                # Use f-string with conditional expression for optimal performance
+                formatted_part = (
+                    f"🤖 {ctx_msg.sender}: {ctx_msg.content}"
+                    if ctx_msg.is_bot
+                    else f"{ctx_msg.sender}: {ctx_msg.content}"
                 )
+                formatted_parts.append(formatted_part)
 
-            return "\n".join(formatted_messages)
+            # Use join with pre-allocated list for efficiency
+            return "\n".join(formatted_parts)
         else:
             # Legacy context mode - maintain exact existing behavior
             if not self._context_messages_legacy:
@@ -478,6 +496,9 @@ class ChatClient:
         KEP-001 Increment B: Implements mention-aware context prioritization
         by putting messages from the current sender and recent mentions first.
 
+        Optimized for performance in KEP-001 Increment C with efficient message
+        categorization and minimal string operations.
+
         Args:
             messages: List of context messages to prioritize
             current_sender: Username of current message sender
@@ -485,25 +506,27 @@ class ChatClient:
         Returns:
             list[ContextMessage]: Prioritized messages (most relevant first)
         """
-        # Separate messages into categories
-        sender_messages = []
+        # Pre-compute mention patterns for efficiency (KEP-001 Increment C)
+        bot_name_lower = self._bot_name.lower()
+        mention_pattern = f"@{bot_name_lower}"
+
+        # Efficient message categorization using list comprehensions
+        sender_messages = [msg for msg in messages if msg.sender == current_sender]
+
+        # For non-sender messages, check for mentions efficiently
+        non_sender_messages = [msg for msg in messages if msg.sender != current_sender]
+
         mention_messages = []
         other_messages = []
 
-        bot_name_lower = self._bot_name.lower()
-
-        for msg in messages:
-            if msg.sender == current_sender:
-                sender_messages.append(msg)
-            elif (
-                bot_name_lower in msg.content.lower()
-                or f"@{bot_name_lower}" in msg.content.lower()
-            ):
+        for msg in non_sender_messages:
+            content_lower = msg.content.lower()
+            if bot_name_lower in content_lower or mention_pattern in content_lower:
                 mention_messages.append(msg)
             else:
                 other_messages.append(msg)
 
-        # Sort each category by timestamp (most recent first)
+        # Sort each category by timestamp (most recent first) - in-place for efficiency
         sender_messages.sort(key=lambda x: x.timestamp, reverse=True)
         mention_messages.sort(key=lambda x: x.timestamp, reverse=True)
         other_messages.sort(key=lambda x: x.timestamp, reverse=True)
@@ -519,6 +542,9 @@ class ChatClient:
         KEP-001 Increment B: Implements token-aware context truncation to prevent
         overwhelming the LLM with too much context.
 
+        Optimized for performance in KEP-001 Increment C with efficient token
+        calculation avoiding unnecessary string operations.
+
         Args:
             messages: Prioritized messages to potentially truncate
 
@@ -528,16 +554,21 @@ class ChatClient:
         if not messages:
             return []
 
-        # Simple token estimation: roughly 4 characters per token
-        # This is a conservative estimate for most models
+        # Optimized token estimation (KEP-001 Increment C)
+        # Avoid string formatting for performance - just calculate lengths
         estimated_tokens = 0
         selected_messages = []
 
+        # Pre-calculate bot prefix length for efficiency
+        bot_prefix_length = 5  # Length of "🤖 " (emoji + space)
+
         for msg in messages:
-            # Estimate tokens for this message (sender + content + formatting)
-            prefix = "🤖 " if msg.is_bot else ""
-            message_text = f"{prefix}{msg.sender}: {msg.content}"
-            message_tokens = len(message_text) // 4  # Rough token estimation
+            # Efficient token estimation without string formatting
+            prefix_length = bot_prefix_length if msg.is_bot else 0
+            message_length = (
+                prefix_length + len(msg.sender) + len(msg.content) + 2  # ": " separator
+            )
+            message_tokens = message_length // 4  # Conservative token estimation
 
             # Check if adding this message would exceed limit
             if estimated_tokens + message_tokens > self._max_context_tokens:
@@ -547,6 +578,341 @@ class ChatClient:
             estimated_tokens += message_tokens
 
         return selected_messages
+
+    def _get_context_memory_usage(self) -> dict[str, int]:
+        """Get detailed memory usage statistics for context storage.
+
+        KEP-001 Increment C: Enhanced monitoring for context memory usage
+        to ensure optimal performance and memory efficiency.
+
+        Returns:
+            dict[str, int]: Memory usage statistics in bytes
+        """
+        stats = {
+            "total_context_bytes": 0,
+            "message_count": 0,
+            "avg_message_size": 0,
+            "estimated_tokens": 0,
+        }
+
+        if self._enhanced_context and hasattr(self, "_context_messages_structured"):
+            messages = list(self._context_messages_structured)
+            stats["message_count"] = len(messages)
+
+            if messages:
+                total_bytes = 0
+                total_tokens = 0
+
+                for msg in messages:
+                    # Calculate memory usage for ContextMessage
+                    content_bytes = sys.getsizeof(msg.content)
+                    sender_bytes = sys.getsizeof(msg.sender)
+                    timestamp_bytes = sys.getsizeof(msg.timestamp)
+                    message_id_bytes = sys.getsizeof(msg.message_id)
+
+                    message_bytes = (
+                        content_bytes
+                        + sender_bytes
+                        + timestamp_bytes
+                        + message_id_bytes
+                        + sys.getsizeof(msg)  # Object overhead
+                    )
+                    total_bytes += message_bytes
+
+                    # Estimate tokens (conservative 4 chars per token)
+                    total_tokens += len(msg.content) // 4
+
+                stats["total_context_bytes"] = total_bytes
+                stats["avg_message_size"] = total_bytes // len(messages)
+                stats["estimated_tokens"] = total_tokens
+
+        elif hasattr(self, "_context_messages_legacy"):
+            # Legacy mode memory calculation
+            messages = self._context_messages_legacy
+            stats["message_count"] = len(messages)
+
+            if messages:
+                total_bytes = sum(sys.getsizeof(msg) for msg in messages)
+                stats["total_context_bytes"] = total_bytes
+                stats["avg_message_size"] = total_bytes // len(messages)
+                stats["estimated_tokens"] = sum(len(msg) for msg in messages) // 4
+
+        return stats
+
+    def _log_context_memory_usage(self) -> None:
+        """Log context memory usage for monitoring and optimization.
+
+        KEP-001 Increment C: Periodic memory usage logging to track
+        performance and identify potential memory issues.
+        """
+        stats = self._get_context_memory_usage()
+
+        # Log memory usage with appropriate level based on usage
+        if stats["total_context_bytes"] > 1024 * 1024:  # > 1MB
+            log_level = logging.WARNING
+            status = "HIGH"
+        elif stats["total_context_bytes"] > 512 * 1024:  # > 512KB
+            log_level = logging.INFO
+            status = "MODERATE"
+        else:
+            log_level = logging.DEBUG
+            status = "NORMAL"
+
+        logger.log(
+            log_level,
+            f"Context memory usage [{status}]: "
+            f"{stats['total_context_bytes']:,} bytes, "
+            f"{stats['message_count']} messages, "
+            f"~{stats['estimated_tokens']} tokens, "
+            f"avg {stats['avg_message_size']} bytes/msg",
+        )
+
+        # Additional warning for excessive memory usage
+        if stats["total_context_bytes"] > 5 * 1024 * 1024:  # > 5MB
+            logger.warning(
+                "Context memory usage is very high (>5MB). Consider reducing "
+                "CONTEXT_WINDOW_SIZE or MAX_CONTEXT_TOKENS for better performance."
+            )
+
+    def _log_context_performance_metrics(
+        self,
+        operation: str,
+        duration_ms: float,
+        message_count: int,
+        result_size: int = 0,
+    ) -> None:
+        """Log performance metrics for context operations.
+
+        KEP-001 Increment C: Track and log performance metrics for context
+        operations to identify bottlenecks and optimization opportunities.
+
+        Args:
+            operation: Name of the context operation
+            duration_ms: Duration in milliseconds
+            message_count: Number of messages processed
+            result_size: Size of result (bytes, tokens, etc.)
+        """
+        # Determine log level based on performance
+        if duration_ms > 100:  # > 100ms
+            log_level = logging.WARNING
+            status = "SLOW"
+        elif duration_ms > 50:  # > 50ms
+            log_level = logging.INFO
+            status = "MODERATE"
+        else:
+            log_level = logging.DEBUG
+            status = "FAST"
+
+        logger.log(
+            log_level,
+            f"Context {operation} performance [{status}]: "
+            f"{duration_ms:.2f}ms, {message_count} messages"
+            + (f", {result_size} result size" if result_size > 0 else ""),
+        )
+
+        # Warning for very slow operations
+        if duration_ms > 200:  # > 200ms
+            logger.warning(
+                f"Context {operation} is very slow ({duration_ms:.2f}ms). "
+                "Consider optimizing context window size or token limits."
+            )
+
+    def get_context_with_metrics(self, current_sender: str | None = None) -> str | None:
+        """Get context with performance metrics tracking.
+
+        KEP-001 Increment C: Enhanced version of get_context that tracks
+        performance metrics for monitoring and optimization.
+
+        Args:
+            current_sender: Username of current message sender for prioritization
+
+        Returns:
+            str | None: Formatted context or None if no context available
+        """
+        start_time = time.perf_counter()
+
+        # Call the optimized get_context method
+        result = self.get_context(current_sender)
+
+        # Calculate performance metrics
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+
+        # Determine message count based on mode
+        if self._enhanced_context and hasattr(self, "_context_messages_structured"):
+            message_count = len(self._context_messages_structured)
+        elif hasattr(self, "_context_messages_legacy"):
+            message_count = len(self._context_messages_legacy)
+        else:
+            message_count = 0
+
+        # Calculate result size if context exists
+        result_size = len(result) if result else 0
+
+        # Log performance metrics
+        self._log_context_performance_metrics(
+            "get_context", duration_ms, message_count, result_size
+        )
+
+        return result
+
+    def _prioritize_context_messages_with_metrics(
+        self, messages: list[ContextMessage], current_sender: str
+    ) -> list[ContextMessage]:
+        """Prioritize context messages with performance tracking.
+
+        KEP-001 Increment C: Enhanced version with performance metrics.
+
+        Args:
+            messages: List of context messages to prioritize
+            current_sender: Username of current message sender
+
+        Returns:
+            list[ContextMessage]: Prioritized messages (most relevant first)
+        """
+        start_time = time.perf_counter()
+
+        result = self._prioritize_context_messages(messages, current_sender)
+
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+
+        self._log_context_performance_metrics(
+            "prioritize_messages", duration_ms, len(messages), len(result)
+        )
+
+        return result
+
+    def _apply_token_limit_with_metrics(
+        self, messages: list[ContextMessage]
+    ) -> list[ContextMessage]:
+        """Apply token limit with performance tracking.
+
+        KEP-001 Increment C: Enhanced version with performance metrics.
+
+        Args:
+            messages: Prioritized messages to potentially truncate
+
+        Returns:
+            list[ContextMessage]: Messages within token limit
+        """
+        start_time = time.perf_counter()
+
+        result = self._apply_token_limit(messages)
+
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+
+        # Calculate estimated tokens for the result
+        estimated_tokens = sum(
+            (len(msg.sender) + len(msg.content) + 7) // 4  # Conservative estimate
+            for msg in result
+        )
+
+        self._log_context_performance_metrics(
+            "apply_token_limit", duration_ms, len(messages), estimated_tokens
+        )
+
+        return result
+
+    def _validate_memory_bounds(self) -> dict[str, bool]:
+        """Validate that context memory usage is within acceptable bounds.
+
+        KEP-001 Increment C: Comprehensive memory validation to ensure
+        optimal performance and prevent memory issues.
+
+        Returns:
+            dict[str, bool]: Validation results for different memory aspects
+        """
+        stats = self._get_context_memory_usage()
+
+        validation_results = {
+            "within_reasonable_bounds": stats["total_context_bytes"]
+            < 5 * 1024 * 1024,  # < 5MB
+            "within_warning_bounds": stats["total_context_bytes"]
+            < 1024 * 1024,  # < 1MB
+            "message_count_reasonable": stats["message_count"]
+            <= self._context_window_size,
+            "avg_message_size_reasonable": stats["avg_message_size"]
+            < 10 * 1024,  # < 10KB per message
+            "token_count_reasonable": stats["estimated_tokens"]
+            <= self._max_context_tokens * 2,  # Allow some buffer
+        }
+
+        # Log validation results if there are issues
+        failed_validations = [k for k, v in validation_results.items() if not v]
+        if failed_validations:
+            logger.warning(
+                f"Memory validation failed for: {', '.join(failed_validations)}. "
+                f"Current stats: {stats}"
+            )
+
+        return validation_results
+
+    def _enforce_memory_bounds(self) -> None:
+        """Enforce memory bounds by cleaning up context if necessary.
+
+        KEP-001 Increment C: Proactive memory management to prevent
+        excessive memory usage and maintain performance.
+        """
+        validation = self._validate_memory_bounds()
+
+        # If memory usage is excessive, take corrective action
+        if not validation["within_reasonable_bounds"]:
+            logger.warning(
+                "Context memory usage exceeded reasonable bounds. Cleaning up..."
+            )
+
+            if self._enhanced_context and hasattr(self, "_context_messages_structured"):
+                # Reduce context window size temporarily
+                target_size = max(self._context_window_size // 2, 5)
+
+                # Keep only the most recent messages
+                recent_messages = list(self._context_messages_structured)[-target_size:]
+                self._context_messages_structured.clear()
+                self._context_messages_structured.extend(recent_messages)
+
+                logger.info(
+                    f"Reduced context to {len(recent_messages)} messages for memory efficiency"
+                )
+
+            elif hasattr(self, "_context_messages_legacy"):
+                # Reduce legacy context
+                target_size = max(self._context_window_size // 2, 5)
+                self._context_messages_legacy = self._context_messages_legacy[
+                    -target_size:
+                ]
+
+                logger.info(
+                    f"Reduced legacy context to {len(self._context_messages_legacy)} messages"
+                )
+
+    async def add_message_to_context_with_validation(
+        self, message: str, sender: str, is_bot: bool = False
+    ) -> None:
+        """Add message to context with memory validation and bounds enforcement.
+
+        KEP-001 Increment C: Enhanced version that includes memory validation
+        and automatic bounds enforcement for production safety.
+
+        Args:
+            message: The chat message text
+            sender: Username of the sender
+            is_bot: Whether this message is from the bot
+        """
+        # Add message normally
+        await self.add_message_to_context(message, sender, is_bot)
+
+        # Validate memory bounds every 25 messages for efficiency
+        if self._enhanced_context and hasattr(self, "_context_messages_structured"):
+            message_count = len(self._context_messages_structured)
+        elif hasattr(self, "_context_messages_legacy"):
+            message_count = len(self._context_messages_legacy)
+        else:
+            message_count = 0
+
+        if message_count % 25 == 0:
+            self._enforce_memory_bounds()
 
     async def send_message(self, message: str) -> None:
         """Send message to chat.
