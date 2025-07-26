@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from dataclasses import dataclass
 import logging
 import time
-from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from brok.chat import ChatClient
-from brok.config import BotConfig
 from brok.exceptions import BrokError, LLMProviderError
-from brok.llm.base import LLMProvider
+
+if TYPE_CHECKING:
+    from brok.chat import ChatClient
+    from brok.config import BotConfig
+    from brok.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -124,11 +128,11 @@ class ChatBot:
                     if isinstance(e, KeyboardInterrupt):
                         logger.info("Received interrupt signal")
                     else:
-                        logger.error(f"Task error: {e}")
+                        logger.exception(f"Task error: {e}")
                         self._stats.errors_count += 1
 
         except Exception as e:
-            logger.error(f"Failed to start bot: {e}")
+            logger.exception("Failed to start bot")
             self._stats.errors_count += 1
             raise BrokError(f"Bot startup failed: {e}") from e
 
@@ -150,8 +154,8 @@ class ChatBot:
 
                 await asyncio.sleep(10)  # Check every 10 seconds
 
-            except Exception as e:
-                logger.error(f"Connection monitor error: {e}")
+            except Exception:
+                logger.exception("Connection monitor error")
                 await asyncio.sleep(5)
 
     async def _llm_worker(self, worker_id: int) -> None:
@@ -173,7 +177,7 @@ class ChatBot:
                     message = await asyncio.wait_for(
                         self._chat_client.get_next_message(), timeout=1.0
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue  # Check for shutdown and try again
 
                 logger.info(
@@ -210,26 +214,24 @@ class ChatBot:
                             f"LLM generated empty response for message from {message.sender}"
                         )
 
-                except LLMProviderError as e:
-                    logger.error(
-                        f"LLM error processing message from {message.sender}: {e}"
+                except LLMProviderError:
+                    logger.exception(
+                        f"LLM error processing message from {message.sender}"
                     )
                     self._stats.errors_count += 1
 
                     # Send error message to chat (optional)
-                    try:
+                    with contextlib.suppress(Exception):
                         await self._chat_client.send_message(
                             "Sorry, I'm having trouble generating a response right now."
                         )
-                    except Exception:
-                        pass  # Don't fail if we can't send error message
 
-                except Exception as e:
-                    logger.error(f"Unexpected error in worker {worker_id}: {e}")
+                except Exception:
+                    logger.exception(f"Unexpected error in worker {worker_id}")
                     self._stats.errors_count += 1
 
-            except Exception as e:
-                logger.error(f"Worker {worker_id} error: {e}")
+            except Exception:
+                logger.exception(f"Worker {worker_id} error")
                 self._stats.errors_count += 1
                 await asyncio.sleep(1)  # Brief pause before retrying
 

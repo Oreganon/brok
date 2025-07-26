@@ -26,7 +26,10 @@ class BotConfig:
     llm_max_concurrent_requests: int = 2
 
     # Bot behavior
+    bot_name: str = "brok"  # Bot name for mention detection
     respond_to_keywords: list[str] = field(default_factory=lambda: ["!bot", "!ask"])
+    respond_to_mentions: bool = True  # Respond when bot is mentioned
+    respond_to_commands: bool = True  # Parse and respond to commands
     ignore_users: list[str] = field(default_factory=list)
     context_window_size: int = 10
 
@@ -84,6 +87,19 @@ class BotConfig:
             if not keywords:
                 raise ConfigurationError("BOT_KEYWORDS cannot be empty")
 
+            # Parse bot name
+            bot_name = os.getenv("BOT_NAME", "brok").strip()
+            if not bot_name:
+                raise ConfigurationError("BOT_NAME cannot be empty")
+
+            # Parse boolean flags
+            respond_to_mentions = (
+                os.getenv("BOT_RESPOND_TO_MENTIONS", "true").lower() == "true"
+            )
+            respond_to_commands = (
+                os.getenv("BOT_RESPOND_TO_COMMANDS", "true").lower() == "true"
+            )
+
             return cls(
                 chat_environment=chat_env,
                 jwt_token=os.getenv("STRIMS_JWT"),
@@ -94,7 +110,10 @@ class BotConfig:
                 llm_temperature=temperature,
                 llm_timeout_seconds=timeout_seconds,
                 llm_max_concurrent_requests=max_concurrent,
+                bot_name=bot_name,
                 respond_to_keywords=keywords,
+                respond_to_mentions=respond_to_mentions,
+                respond_to_commands=respond_to_commands,
                 context_window_size=context_window_size,
                 log_level=log_level,
                 log_chat_messages=os.getenv("LOG_CHAT", "false").lower() == "true",
