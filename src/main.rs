@@ -1,6 +1,5 @@
 use clap::Parser;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::{read_dir, read_to_string, write};
 use std::sync::Arc;
@@ -8,7 +7,12 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time;
 use wsgg::Connection;
 
+mod inference;
 mod tools;
+
+use inference::{
+    create_provider, inference_worker, InferenceManager, InferenceRequest, ProviderType,
+};
 use tools::ToolManager;
 
 /// AI Chat Bot
@@ -26,25 +30,14 @@ struct Args {
     /// API endpoint host and port (e.g., localhost:8080)
     #[arg(long, default_value = "localhost:8080")]
     api_host: String,
-}
 
-#[derive(Serialize, Deserialize)]
-struct OllamaRequest {
-    model: String,
-    prompt: String,
-    stream: bool,
-}
+    /// AI provider type: ollama or llama-cpp
+    #[arg(long, default_value = "ollama")]
+    provider: String,
 
-#[derive(Serialize, Deserialize)]
-struct OllamaResponse {
-    response: String,
-}
-
-#[derive(Debug, Clone)]
-struct InferenceRequest {
-    prompt: String,
-    sender: String,
-    response_tx: mpsc::UnboundedSender<String>,
+    /// Model name (only used with Ollama provider)
+    #[arg(long)]
+    model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,232 +55,27 @@ struct UserUpdateRequest {
 }
 
 struct App {
-    client: Client,
     message_history: Arc<Mutex<Vec<String>>>,
     inference_tx: mpsc::UnboundedSender<InferenceRequest>,
     pending_messages: Arc<Mutex<Vec<PendingMessage>>>,
     next_message_id: Arc<Mutex<u64>>,
     available_users: Arc<Mutex<HashSet<String>>>,
     user_update_tx: mpsc::UnboundedSender<UserUpdateRequest>,
-    api_endpoint: String,
-    tool_manager: ToolManager,
 }
 
 impl App {
     fn new(
         inference_tx: mpsc::UnboundedSender<InferenceRequest>,
         user_update_tx: mpsc::UnboundedSender<UserUpdateRequest>,
-        api_host: String,
     ) -> App {
-        let api_endpoint = format!("http://{api_host}/api/generate");
-        let client = Client::new();
-        let tool_manager = ToolManager::new(client.clone());
         App {
-            client,
             message_history: Arc::new(Mutex::new(Vec::new())),
             inference_tx,
             pending_messages: Arc::new(Mutex::new(Vec::new())),
             next_message_id: Arc::new(Mutex::new(1)),
             available_users: Arc::new(Mutex::new(HashSet::new())),
             user_update_tx,
-            api_endpoint,
-            tool_manager,
         }
-    }
-
-    async fn get_ai_response(
-        &self,
-        prompt: String,
-        message_history: &[String],
-    ) -> Result<String, String> {
-        println!("[DEBUG] Getting AI response for prompt: {prompt}");
-
-        // Check if this is a tool call
-        if let Some(tool_call) = self.tool_manager.detect_tool_call(&prompt) {
-            println!("[DEBUG] Detected tool call: {tool_call:?}");
-
-            match self.tool_manager.execute_tool(tool_call).await {
-                Ok(result) => {
-                    // Pass tool result to LLM for response generation
-                    let tool_context = format!("Tool call result: {}", result.content);
-                    let enhanced_prompt = format!("The user asked: \"{prompt}\" and I retrieved this information: {tool_context}. Please provide a natural response.");
-                    return self
-                        .get_llm_response(enhanced_prompt, message_history)
-                        .await;
-                }
-                Err(e) => {
-                    let tool_context = format!("Tool call error: {e}");
-                    let enhanced_prompt = format!("The user asked: \"{prompt}\" but I encountered an error: {tool_context}. Please provide an appropriate error response.");
-                    return self
-                        .get_llm_response(enhanced_prompt, message_history)
-                        .await;
-                }
-            }
-        }
-
-        return self.get_llm_response(prompt, message_history).await;
-    }
-
-    async fn get_llm_response(
-        &self,
-        prompt: String,
-        message_history: &[String],
-    ) -> Result<String, String> {
-        // Detect users in the prompt and get their info
-        let detected_users = self.detect_users_in_message(&prompt).await;
-        let mut user_context = String::new();
-
-        if !detected_users.is_empty() {
-            user_context.push_str("User information:\n");
-            for username in &detected_users {
-                let user_info = self.read_user_info(username).await;
-                if !user_info.trim().is_empty() {
-                    user_context.push_str(&format!("{username}: {user_info}\n"));
-                } else {
-                    user_context.push_str(&format!("{username}: No information available\n"));
-                }
-            }
-            user_context.push('\n');
-        }
-
-        // Build context from last 10 messages
-        let context = if message_history.is_empty() {
-            "No previous messages.".to_string()
-        } else {
-            format!("Recent chat history:\n{}", message_history.join("\n"))
-        };
-
-        let formatted_prompt = format!("You are a chat bot named 'brok'. Respond with ONE short sentence only. Put your response in <reply></reply> tags.
-
-If something is funny, add 'LUL' at the end.
-If something is weird, add 'PeepoWeird' at the end.
-If you don't know, add 'FeelsPepoMan' at the end.
-
-{user_context}Recent messages: {context}
-
-Question: {prompt}
-
-Response:");
-        let request = OllamaRequest {
-            //model: "qwen3:1.7b".to_string(),
-            model: "granite3.3:2b".to_string(),
-            prompt: formatted_prompt,
-            stream: false,
-        };
-        println!(
-            "[DEBUG] Created request: {:?}",
-            serde_json::to_string(&request).unwrap_or_else(|_| "Failed to serialize".to_string())
-        );
-
-        println!("[DEBUG] Sending request to API at {}", self.api_endpoint);
-        println!(
-            "[DEBUG] Request body: {}",
-            serde_json::to_string(&request).unwrap_or_else(|_| "Failed to serialize".to_string())
-        );
-
-        let response = self
-            .client
-            .post(&self.api_endpoint)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| {
-                println!("[DEBUG] HTTP request failed: {}", e);
-                e.to_string()
-            })?;
-        println!(
-            "[DEBUG] Received response with status: {}",
-            response.status()
-        );
-
-        let ollama_response: OllamaResponse = response.json().await.map_err(|e| e.to_string())?;
-        println!("[DEBUG] AI response: {}", ollama_response.response);
-
-        // Parse the reply from <reply></reply> tags
-        let parsed_reply = self.parse_reply(&ollama_response.response);
-        println!("[DEBUG] Parsed reply: {parsed_reply}");
-        Ok(parsed_reply)
-    }
-
-    fn parse_reply(&self, response: &str) -> String {
-        // Check if response is too long (indicates multiple responses bug)
-        if response.len() > 500 {
-            println!(
-                "[DEBUG] Response too long ({} chars), likely contains multiple examples",
-                response.len()
-            );
-            // Try to extract just the first meaningful reply
-            if let Some(first_reply) = self.extract_first_valid_reply(response) {
-                return first_reply;
-            }
-        }
-
-        // First try to find <reply></reply> tags
-        if let Some(start) = response.find("<reply>") {
-            if let Some(end) = response.find("</reply>") {
-                if end > start {
-                    let reply_start = start + "<reply>".len();
-                    let reply = response[reply_start..end].trim().to_string();
-
-                    // Validate the reply is reasonable
-                    if reply.len() > 200 {
-                        println!("[DEBUG] Reply too long, truncating: {}", reply);
-                        return format!(
-                            "{} FeelsPepoMan",
-                            reply
-                                .split_whitespace()
-                                .take(10)
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        );
-                    }
-
-                    return reply;
-                }
-            }
-        }
-
-        // Fallback: extract the last sentence if no tags found
-        let lines: Vec<&str> = response.lines().collect();
-        if let Some(last_line) = lines.last() {
-            let trimmed = last_line.trim();
-            if !trimmed.is_empty() && trimmed.ends_with('.') {
-                return trimmed.to_string();
-            }
-        }
-
-        // Final fallback: return a safe default response
-        "FeelsPepoMan".to_string()
-    }
-
-    fn extract_first_valid_reply(&self, response: &str) -> Option<String> {
-        // Look for the first occurrence of <reply></reply> before any "User question:" patterns
-        let lines: Vec<&str> = response.lines().collect();
-        let mut reply_lines = Vec::new();
-
-        for line in lines {
-            if line.contains("User question:") || line.contains("Example:") {
-                break; // Stop when we hit example patterns
-            }
-            reply_lines.push(line);
-        }
-
-        let truncated_response = reply_lines.join("\n");
-
-        // Try to parse from the truncated response
-        if let Some(start) = truncated_response.find("<reply>") {
-            if let Some(end) = truncated_response.find("</reply>") {
-                if end > start {
-                    let reply_start = start + "<reply>".len();
-                    let reply = truncated_response[reply_start..end].trim();
-                    if !reply.is_empty() && reply.len() < 100 {
-                        return Some(reply.to_string());
-                    }
-                }
-            }
-        }
-
-        None
     }
 
     async fn add_message_to_history(&self, sender: &str, message: &str) {
@@ -429,49 +217,9 @@ Response:");
     }
 }
 
-async fn inference_worker(
-    mut inference_rx: mpsc::UnboundedReceiver<InferenceRequest>,
-    app: Arc<App>,
-) {
-    println!("[DEBUG] Inference worker started");
-
-    while let Some(request) = inference_rx.recv().await {
-        println!(
-            "[DEBUG] Processing inference request from: {}",
-            request.sender
-        );
-
-        // Get current message history
-        let history = {
-            let history_guard = app.message_history.lock().await;
-            history_guard.clone()
-        };
-
-        // Process inference
-        match app.get_ai_response(request.prompt, &history).await {
-            Ok(response) => {
-                println!("[DEBUG] Inference completed, sending response");
-                if let Err(e) = request.response_tx.send(response) {
-                    eprintln!("[DEBUG] Failed to send response: {e}");
-                }
-            }
-            Err(e) => {
-                eprintln!("[DEBUG] Inference failed: {e}");
-                let error_response =
-                    "Sorry, I encountered an error processing your request.".to_string();
-                if let Err(e) = request.response_tx.send(error_response) {
-                    eprintln!("[DEBUG] Failed to send error response: {e}");
-                }
-            }
-        }
-    }
-
-    println!("[DEBUG] Inference worker stopped");
-}
-
 async fn user_update_worker(
     mut user_update_rx: mpsc::UnboundedReceiver<UserUpdateRequest>,
-    app: Arc<App>,
+    inference_manager: Arc<InferenceManager>,
 ) {
     println!("[DEBUG] User update worker started");
 
@@ -500,7 +248,10 @@ Please provide updated user information for {} only:",
             request.username
         );
 
-        match app.get_llm_response(update_prompt, &[]).await {
+        match inference_manager
+            .get_ai_response(update_prompt, &[], None)
+            .await
+        {
             Ok(updated_info) => {
                 // Write the updated info back to the user file
                 let file_path = format!("users/{}", request.username);
@@ -537,27 +288,50 @@ async fn main() {
     // Create user update channel
     let (user_update_tx, user_update_rx) = mpsc::unbounded_channel();
 
-    let app = Arc::new(App::new(
-        inference_tx,
-        user_update_tx,
-        args.api_host.clone(),
-    ));
+    // Parse provider type
+    let provider_type = match args.provider.to_lowercase().as_str() {
+        "ollama" => ProviderType::Ollama,
+        "llama-cpp" | "llamacpp" => ProviderType::LlamaCpp,
+        _ => {
+            eprintln!("[ERROR] Invalid provider type: {}", args.provider);
+            eprintln!("[ERROR] Valid options: ollama, llama-cpp");
+            std::process::exit(1);
+        }
+    };
+
+    println!("[DEBUG] Using provider: {provider_type:?}");
+
+    let app = Arc::new(App::new(inference_tx, user_update_tx));
 
     // Load available users
     if let Err(e) = app.load_available_users().await {
         eprintln!("[WARNING] Failed to load users: {e}");
     }
 
+    // Create inference provider and manager
+    let client = Client::new();
+    let tool_manager = ToolManager::new(client.clone());
+    let provider = create_provider(provider_type, client, args.api_host.clone(), args.model);
+    let inference_manager = Arc::new(InferenceManager::new(provider, tool_manager));
+
     // Start inference worker
-    let worker_app = Arc::clone(&app);
+    let message_history = Arc::clone(&app.message_history);
+    let available_users = Arc::clone(&app.available_users);
+    let inference_manager_clone = Arc::clone(&inference_manager);
     tokio::spawn(async move {
-        inference_worker(inference_rx, worker_app).await;
+        inference_worker(
+            inference_rx,
+            inference_manager_clone,
+            message_history,
+            available_users,
+        )
+        .await;
     });
 
     // Start user update worker
-    let user_worker_app = Arc::clone(&app);
+    let user_inference_manager = Arc::clone(&inference_manager);
     tokio::spawn(async move {
-        user_update_worker(user_update_rx, user_worker_app).await;
+        user_update_worker(user_update_rx, user_inference_manager).await;
     });
 
     println!("[DEBUG] Reading cookie from: {}", args.cookie);
