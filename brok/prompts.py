@@ -259,7 +259,10 @@ class XMLPromptTemplate(PromptTemplate):
     def _add_structured_tools(
         self, root: ET.Element, tool_schemas: list[dict[str, Any]]
     ) -> None:
-        """Add structured tools section with individual <tool> elements (KEP-002 Increment C).
+        """Add structured tools section with individual tool elements.
+
+        Creates XML tools with individual <tool> elements containing
+        parameter definitions, examples, and usage instructions.
 
         Args:
             root: Root XML element to add tools to
@@ -268,90 +271,58 @@ class XMLPromptTemplate(PromptTemplate):
         if not tool_schemas:
             return
 
-        # Create tools container with count
-        tools_elem = ET.SubElement(root, "tools", count=str(len(tool_schemas)))
+        # Create tools element with metadata
+        tools_elem = ET.SubElement(
+            root, "tools", count=str(len(tool_schemas)), format="structured"
+        )
 
-        # Add each tool as individual element
         for tool_schema in tool_schemas:
-            self._add_tool_element(tools_elem, tool_schema)
+            tool_name = tool_schema.get("name", "unknown")
+            description = tool_schema.get("description", "")
+            parameters = tool_schema.get("parameters", {})
 
-    def _add_tool_element(
-        self, tools_elem: ET.Element, tool_schema: dict[str, Any]
-    ) -> None:
-        """Add a single <tool> element with structured parameters.
-
-        Args:
-            tools_elem: Parent tools element
-            tool_schema: Individual tool schema dictionary
-        """
-        tool_name = tool_schema.get("name", "unknown")
-        tool_desc = tool_schema.get("description", "")
-        parameters = tool_schema.get("parameters", {})
-
-        # Create tool element with name attribute
-        tool_elem = ET.SubElement(tools_elem, "tool", name=tool_name)
-
-        # Add description
-        if tool_desc:
-            desc_elem = ET.SubElement(tool_elem, "description")
-            desc_elem.text = tool_desc
-
-        # Add structured parameters section
-        if parameters and "properties" in parameters:
-            self._add_parameters_section(tool_elem, parameters)
-
-        # Add usage example
-        self._add_usage_example(tool_elem, tool_name, parameters)
-
-    def _add_parameters_section(
-        self, tool_elem: ET.Element, parameters: dict[str, Any]
-    ) -> None:
-        """Add structured parameters section to tool element.
-
-        Args:
-            tool_elem: Parent tool element
-            parameters: Parameters schema dictionary
-        """
-        properties = parameters.get("properties", {})
-        required = parameters.get("required", [])
-
-        if not properties:
-            return
-
-        # Create parameters container
-        params_elem = ET.SubElement(tool_elem, "parameters")
-
-        # Add each parameter with metadata
-        for param_name, param_schema in properties.items():
-            param_type = param_schema.get("type", "string")
-            param_desc = param_schema.get("description", "")
-            is_required = param_name in required
-
-            # Create parameter element with attributes
-            param_elem = ET.SubElement(
-                params_elem,
-                "parameter",
-                name=param_name,
-                type=param_type,
-                required=str(is_required).lower(),
+            # Create individual tool element
+            tool_elem = ET.SubElement(
+                tools_elem, "tool", name=tool_name, category="function"
             )
 
-            # Add parameter description as text content
-            if param_desc:
-                param_elem.text = param_desc
+            # Add description
+            desc_elem = ET.SubElement(tool_elem, "description")
+            desc_elem.text = description
 
-    def _add_usage_example(
+            # Add parameters section if available
+            if parameters:
+                params_elem = ET.SubElement(tool_elem, "parameters")
+
+                # Add parameter definitions
+                properties = parameters.get("properties", {})
+                required_params = parameters.get("required", [])
+
+                for param_name, param_schema in properties.items():
+                    param_elem = ET.SubElement(
+                        params_elem,
+                        "parameter",
+                        name=param_name,
+                        type=param_schema.get("type", "string"),
+                        required=str(param_name in required_params).lower(),
+                    )
+                    param_elem.text = param_schema.get("description", "")
+
+            # Add usage example
+            self._add_tool_usage_example(tool_elem, tool_name, parameters)
+
+    def _add_tool_usage_example(
         self, tool_elem: ET.Element, tool_name: str, parameters: dict[str, Any]
     ) -> None:
-        """Add JSON usage example to tool element.
+        """Add usage example for a tool.
 
         Args:
-            tool_elem: Parent tool element
+            tool_elem: Tool XML element to add example to
             tool_name: Name of the tool
             parameters: Parameters schema dictionary
         """
-        # Create example usage
-        example_params = {}
+        # Create example usage with explicit Any type for mixed values
+        example_params: dict[str, Any] = {}
         properties = parameters.get("properties", {})
 
         # Generate example values for parameters

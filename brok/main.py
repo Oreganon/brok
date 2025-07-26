@@ -16,6 +16,8 @@ from brok.llm.base import LLMConfig, LLMProvider
 from brok.llm.llamacpp import LlamaCppProvider
 from brok.llm.ollama import OllamaProvider
 from brok.prompts import (
+    PromptTemplate,
+    XMLPromptTemplate,
     create_custom_template,
     create_custom_xml_template,
     get_prompt_template,
@@ -147,6 +149,7 @@ async def main() -> None:
         )
 
         # Create prompt template based on configuration (KEP-002 Increment B)
+        prompt_template: PromptTemplate | XMLPromptTemplate
         if config.xml_prompt_formatting:
             # Use XMLPromptTemplate when XML formatting is enabled
             if config.prompt_style == "custom":

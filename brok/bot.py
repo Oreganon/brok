@@ -494,7 +494,7 @@ class ChatBot:
                 start_time = time.time()
                 try:
                     response_chunks = []
-                    async for chunk in self._llm_provider.generate(  # type: ignore[attr-defined]
+                    async for chunk in self._llm_provider.generate(  # type: ignore[call-arg,attr-defined]
                         message.original_message,
                         message.context,
                         message.context_messages,

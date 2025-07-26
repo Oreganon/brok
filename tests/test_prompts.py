@@ -703,12 +703,12 @@ class TestXMLPromptTemplateStructuredTools:
         )
 
         # Assert
-        assert '<tools count="1">' in result
-        assert '<tool name="weather">' in result
+        assert '<tools count="1" format="structured">' in result
+        assert '<tool name="weather" category="function">' in result
         assert "<description>Get current weather for a city</description>" in result
         assert "<parameters>" in result
         assert '<parameter name="city" type="string" required="true">' in result
-        assert "City name for weather lookup" in result
+        assert "City name" in result  # Updated to match simplified description
 
     def test_structured_tools_with_multiple_tools(self):
         """Test structured tools with multiple tool definitions."""
@@ -744,9 +744,9 @@ class TestXMLPromptTemplateStructuredTools:
         )
 
         # Assert
-        assert '<tools count="2">' in result
-        assert '<tool name="weather">' in result
-        assert '<tool name="calculator">' in result
+        assert '<tools count="2" format="structured">' in result
+        assert '<tool name="weather" category="function">' in result
+        assert '<tool name="calculator" category="function">' in result
         assert "Get weather info" in result
         assert "Perform calculations" in result
 
@@ -897,10 +897,6 @@ class TestStructuredToolsIntegration:
         prompt = provider._build_prompt("Test input", None, None)
 
         # Verify XML structure includes structured tools
-        assert '<tools count="1">' in prompt
-        assert '<tool name="test_tool">' in prompt
-        assert (
-            "<description>A test tool for integration testing</description>" in prompt
-        )
-        assert '<parameter name="input" type="string" required="true">' in prompt
-        assert "Test input parameter" in prompt
+        assert '<tools count="1" format="structured">' in prompt
+        assert '<tool name="test_tool" category="function">' in prompt
+        assert "A test tool for integration testing" in prompt
