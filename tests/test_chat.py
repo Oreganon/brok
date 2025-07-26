@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -160,7 +161,7 @@ class TestChatClient:
                 )
 
     @pytest.mark.asyncio
-    async def test_should_respond_to_pure_keywords(self, _chat_client: ChatClient):
+    async def test_should_respond_to_pure_keywords(self, chat_client: ChatClient):
         """Test message filtering with pure keyword matches that aren't parsed as commands."""
         # Create a client with keywords that won't be parsed as commands
         filters = create_default_filters(["hey", "hello"])
@@ -841,6 +842,263 @@ class TestChatClient:
         # Should include some but not all messages due to token limit
         assert len(limited) < len(messages)
         assert len(limited) > 0
+
+    @pytest.mark.asyncio
+    async def test_context_performance_with_large_windows(self) -> None:
+        """Test KEP-001 Increment C: performance with large context windows."""
+
+        # Create client with large context window for performance testing
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=500,  # Large window
+            enhanced_context=True,
+            max_context_tokens=2000,  # High token limit
+        )
+
+        # Add many messages to test performance
+        start_time = time.perf_counter()
+
+        for i in range(500):
+            await client.add_message_to_context(
+                f"Test message {i} with some content to simulate real chat",
+                f"user{i % 10}",  # 10 different users
+                is_bot=(i % 5 == 0),  # Every 5th message is from bot
+            )
+
+        add_duration = time.perf_counter() - start_time
+
+        # Test context retrieval performance
+        start_time = time.perf_counter()
+        context = client.get_context(current_sender="user1")
+        get_duration = time.perf_counter() - start_time
+
+        # Verify results
+        assert context is not None
+        assert len(context) > 0
+
+        # Performance assertions (should be fast even with 500 messages)
+        assert add_duration < 1.0, (
+            f"Adding 500 messages took {add_duration:.3f}s (too slow)"
+        )
+        assert get_duration < 0.1, (
+            f"Getting context took {get_duration:.3f}s (too slow)"
+        )
+
+        # Memory usage should be reasonable
+        memory_stats = client._get_context_memory_usage()
+        assert memory_stats["total_context_bytes"] < 10 * 1024 * 1024  # < 10MB
+
+    @pytest.mark.asyncio
+    async def test_prioritization_performance_stress_test(self) -> None:
+        """Test KEP-001 Increment C: prioritization performance under stress."""
+
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=1000,  # Very large window
+            enhanced_context=True,
+            prioritize_mentions=True,
+            bot_name="testbot",
+        )
+
+        # Create a mix of regular messages and mentions
+        messages = []
+        for i in range(1000):
+            if i % 20 == 0:  # 5% mention rate
+                content = f"@testbot help with task {i}"
+            else:
+                content = f"Regular message {i} with varied content length for testing"
+
+            msg = ContextMessage(
+                content=content,
+                sender=f"user{i % 50}",  # 50 different users
+                timestamp=datetime.now(),
+                is_bot=False,
+            )
+            messages.append(msg)
+
+        # Test prioritization performance
+        start_time = time.perf_counter()
+        prioritized = client._prioritize_context_messages(messages, "user1")
+        duration = time.perf_counter() - start_time
+
+        # Verify results
+        assert len(prioritized) == len(messages)
+        assert prioritized[0].sender == "user1"  # user1 messages should be first
+
+        # Performance assertion
+        assert duration < 0.05, (
+            f"Prioritizing 1000 messages took {duration:.3f}s (too slow)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_token_limiting_performance_stress_test(self) -> None:
+        """Test KEP-001 Increment C: token limiting performance under stress."""
+
+        client = ChatClient(
+            response_filters=[],
+            enhanced_context=True,
+            max_context_tokens=1000,  # Moderate token limit
+        )
+
+        # Create messages with varying content lengths
+        messages = []
+        for i in range(1000):
+            # Vary content length to test token calculation efficiency
+            content_length = 50 + (i % 200)  # 50-250 character messages
+            content = "x" * content_length
+
+            msg = ContextMessage(
+                content=content,
+                sender=f"user{i % 20}",
+                timestamp=datetime.now(),
+                is_bot=(i % 10 == 0),
+            )
+            messages.append(msg)
+
+        # Test token limiting performance
+        start_time = time.perf_counter()
+        limited = client._apply_token_limit(messages)
+        duration = time.perf_counter() - start_time
+
+        # Verify results
+        assert len(limited) < len(messages)  # Should be limited
+        assert len(limited) > 0  # Should include some messages
+
+        # Performance assertion
+        assert duration < 0.02, (
+            f"Token limiting 1000 messages took {duration:.3f}s (too slow)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_memory_usage_validation_under_load(self) -> None:
+        """Test KEP-001 Increment C: memory usage validation with heavy load."""
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=100,
+            enhanced_context=True,
+        )
+
+        # Add messages and track memory growth
+        initial_stats = client._get_context_memory_usage()
+
+        # Add 100 realistic messages
+        for i in range(100):
+            await client.add_message_to_context(
+                f"This is a realistic chat message {i} with typical length and content for testing memory usage patterns and growth",
+                f"user{i % 15}",
+                is_bot=(i % 8 == 0),
+            )
+
+        final_stats = client._get_context_memory_usage()
+
+        # Memory validation
+        assert final_stats["message_count"] == 100
+        assert final_stats["total_context_bytes"] > initial_stats["total_context_bytes"]
+        assert (
+            final_stats["total_context_bytes"] < 1024 * 1024
+        )  # < 1MB for 100 messages
+        assert final_stats["avg_message_size"] > 0
+        assert final_stats["estimated_tokens"] > 0
+
+    @pytest.mark.asyncio
+    async def test_context_retrieval_consistency_under_load(self) -> None:
+        """Test KEP-001 Increment C: context retrieval consistency with heavy usage."""
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=50,
+            enhanced_context=True,
+            prioritize_mentions=True,
+            max_context_tokens=800,
+        )
+
+        # Add messages with known patterns
+        for i in range(50):
+            if i == 25:  # Add a mention in the middle
+                await client.add_message_to_context(
+                    "@brok what's the weather?", "alice"
+                )
+            else:
+                await client.add_message_to_context(f"Message {i}", f"user{i % 5}")
+
+        # Test multiple context retrievals for consistency
+        context1 = client.get_context(current_sender="alice")
+        context2 = client.get_context(current_sender="alice")
+        context3 = client.get_context(current_sender="user1")
+
+        # Results should be consistent
+        assert context1 == context2
+        assert context1 is not None
+        assert context3 is not None
+
+        # Alice's context should prioritize her messages
+        assert "alice:" in context1
+
+        # Verify context length is reasonable
+        assert len(context1) < 5000  # Should be bounded by token limit
+
+    @pytest.mark.asyncio
+    async def test_memory_bounds_validation_and_enforcement(self) -> None:
+        """Test KEP-001 Increment C: memory bounds validation and enforcement."""
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=20,  # Small window for easier testing
+            enhanced_context=True,
+        )
+
+        # Add messages to trigger memory validation
+        for i in range(20):
+            await client.add_message_to_context(
+                f"Message {i} " + "x" * 50,  # Moderate messages to test memory bounds
+                f"user{i % 3}",
+                is_bot=(i % 5 == 0),
+            )
+
+        # Test memory validation
+        validation_results = client._validate_memory_bounds()
+
+        # All validations should pass for reasonable usage
+        assert validation_results["message_count_reasonable"]
+        assert validation_results["token_count_reasonable"]
+
+        # Test memory enforcement (should not raise exceptions)
+        client._enforce_memory_bounds()
+
+        # Memory usage should still be within bounds after enforcement
+        post_enforcement_validation = client._validate_memory_bounds()
+        assert post_enforcement_validation["within_warning_bounds"]
+
+    @pytest.mark.asyncio
+    async def test_context_performance_metrics_logging(self) -> None:
+        """Test KEP-001 Increment C: performance metrics logging functionality."""
+        client = ChatClient(
+            response_filters=[],
+            context_window_size=50,
+            enhanced_context=True,
+            prioritize_mentions=True,
+        )
+
+        # Add messages for testing
+        for i in range(50):
+            await client.add_message_to_context(f"Test message {i}", f"user{i % 5}")
+
+        # Test context retrieval with metrics (should not raise exceptions)
+        context = client.get_context_with_metrics(current_sender="user1")
+
+        assert context is not None
+        assert len(context) > 0
+
+        # Test that metrics methods work without errors
+        messages = list(client._context_messages_structured)
+
+        # Test prioritization with metrics
+        prioritized = client._prioritize_context_messages_with_metrics(
+            messages, "user1"
+        )
+        assert len(prioritized) == len(messages)
+
+        # Test token limiting with metrics
+        limited = client._apply_token_limit_with_metrics(messages)
+        assert len(limited) <= len(messages)
 
 
 class TestDefaultFilters:
