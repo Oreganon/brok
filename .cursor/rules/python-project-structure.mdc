@@ -1,0 +1,37 @@
+---
+alwaysApply: true
+description: "Python project structure and development standards"
+---
+
+# Python Project Structure & Standards
+
+## Project Organization
+- Main source code in the root directory or `src/` directory
+- Tests in `tests/` directory, mirroring the source structure
+- Configuration files in the root: [pyproject.toml](mdc:pyproject.toml), [.pre-commit-config.yaml](mdc:.pre-commit-config.yaml)
+- Entry point is [main.py](mdc:main.py) for simple projects or `src/{package_name}/__init__.py` for packages
+
+## Code Quality Standards
+- Use **ruff** for linting and formatting (configured in [pyproject.toml](mdc:pyproject.toml))
+- Maintain **100% type coverage** with mypy
+- Write **comprehensive tests** using pytest
+- Follow **PEP 8** style guidelines (enforced by ruff)
+- Use **docstrings** for all public functions, classes, and modules
+- Keep **line length at 88 characters** (Black/ruff default)
+
+## Dependencies Management
+- All dependencies declared in [pyproject.toml](mdc:pyproject.toml)
+- Use version pinning for production dependencies
+- Separate dev dependencies in `[project.optional-dependencies.dev]`
+- Lock dependencies with `pip-tools` or similar when needed
+
+## Git Workflow
+- Use [.pre-commit-config.yaml](mdc:.pre-commit-config.yaml) for automated checks
+- GitHub Actions in [.github/workflows/](mdc:.github/workflows/) for CI/CD
+- Conventional commit messages
+- Branch protection with required checks
+
+## Documentation
+- README with setup, usage, and contribution instructions
+- Inline docstrings following Google or NumPy style
+- Type hints for all function signatures

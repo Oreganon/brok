@@ -1,0 +1,68 @@
+---
+globs: "pyproject.toml,.pre-commit-config.yaml,.github/workflows/*.yml,.github/workflows/*.yaml"
+description: "Configuration files and CI/CD pipeline standards"
+---
+
+# Configuration & CI/CD Standards
+
+## pyproject.toml Configuration
+
+### Project Section
+- Always include `requires-python` with minimum supported version
+- Use semantic versioning for project version
+- Include comprehensive project description
+- Separate dev dependencies in `[project.optional-dependencies.dev]`
+
+### Tool Configuration
+- **ruff**: Configure both linting and formatting sections
+- **mypy**: Enable strict type checking with comprehensive warnings
+- **pytest**: Set up coverage reporting with >90% threshold
+- **coverage**: Exclude test files and virtual environments
+- **bandit**: Configure security scanning exclusions
+
+### Dependencies
+- Pin major versions for stability
+- Group related dependencies logically
+- Use version ranges for development dependencies
+- Include all necessary development tools
+
+## Pre-commit Configuration
+
+### Hook Organization
+- Basic file checks (trailing whitespace, YAML/JSON validation)
+- Code formatting and linting (ruff)
+- Type checking (mypy)
+- Security scanning (bandit)
+- Configuration validation
+
+### Hook Configuration
+- Use latest stable versions for consistency
+- Configure hooks to auto-fix when possible
+- Include additional dependencies for type checking
+- Set appropriate file patterns and exclusions
+
+## GitHub Actions Workflows
+
+### Job Structure
+- Separate jobs for different concerns (lint, test, security)
+- Use matrix strategies for multiple Python versions when needed
+- Cache pip dependencies for faster builds
+- Use official GitHub actions (`actions/checkout@v4`, `actions/setup-python@v5`)
+
+### CI Pipeline Steps
+1. **Lint and Type Check**: ruff linting/formatting, mypy type checking
+2. **Testing**: pytest execution with coverage reporting
+3. **Security**: bandit security scanning, safety dependency checking
+
+### Best Practices
+- Pin action versions for reproducibility
+- Use appropriate Python versions matching project requirements
+- Include coverage reporting integration (Codecov)
+- Set up proper caching for dependencies
+- Use non-interactive flags for automated environments
+
+## Configuration Maintenance
+- Regularly update tool versions in pre-commit hooks
+- Keep GitHub Actions up to date with latest versions
+- Review and update linting rules periodically
+- Maintain consistency between local and CI environments
