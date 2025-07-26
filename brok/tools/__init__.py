@@ -6,7 +6,7 @@ access external APIs and services to provide real-time information.
 Available tools:
 - Weather: Get current weather and forecasts
 - Calculator: Perform mathematical calculations
-- Time: Time and date utilities
+- DateTime: Get current date and time information
 
 Example:
     >>> from brok.tools import ToolRegistry
@@ -21,6 +21,7 @@ from __future__ import annotations
 __all__ = [
     "BaseTool",
     "CalculatorTool",
+    "DateTimeTool",
     "ToolExecutionError",
     "ToolExecutionResult",
     "ToolParser",
@@ -30,6 +31,7 @@ __all__ = [
 
 from brok.tools.base import BaseTool, ToolExecutionError, ToolExecutionResult
 from brok.tools.calculator import CalculatorTool
+from brok.tools.datetime import DateTimeTool
 from brok.tools.parser import ToolParser
 from brok.tools.registry import ToolRegistry
 from brok.tools.weather import WeatherTool

@@ -6,6 +6,8 @@ import ast
 import logging
 import math
 import operator
+import re
+from typing import ClassVar
 
 from brok.tools.base import BaseTool, ToolExecutionResult
 
@@ -24,9 +26,11 @@ class CalculatorTool(BaseTool):
         >>> print(result.data)  # "2 + 3 * 4 = 14"
     """
 
-    name = "calculator"
-    description = "Perform mathematical calculations and evaluate expressions"
-    parameters = {
+    name: ClassVar[str] = "calculator"
+    description: ClassVar[str] = (
+        "Perform mathematical calculations and evaluate expressions"
+    )
+    parameters: ClassVar[dict] = {
         "type": "object",
         "properties": {
             "expression": {
@@ -38,7 +42,7 @@ class CalculatorTool(BaseTool):
     }
 
     # Allowed operators and functions for safe evaluation
-    OPERATORS = {
+    OPERATORS: ClassVar[dict] = {
         ast.Add: operator.add,
         ast.Sub: operator.sub,
         ast.Mult: operator.mul,
@@ -50,7 +54,7 @@ class CalculatorTool(BaseTool):
         ast.UAdd: operator.pos,
     }
 
-    FUNCTIONS = {
+    FUNCTIONS: ClassVar[dict] = {
         "abs": abs,
         "round": round,
         "min": min,
@@ -71,7 +75,7 @@ class CalculatorTool(BaseTool):
         "factorial": math.factorial,
     }
 
-    CONSTANTS = {
+    CONSTANTS: ClassVar[dict] = {
         "pi": math.pi,
         "e": math.e,
         "tau": math.tau,
@@ -143,7 +147,7 @@ class CalculatorTool(BaseTool):
             ("solve", ""),
             ("equals", ""),
             ("=", ""),
-            ("×", "*"),
+            ("*", "*"),
             ("÷", "/"),
             ("π", "pi"),
         ]
@@ -152,7 +156,6 @@ class CalculatorTool(BaseTool):
             expression = expression.replace(old, new)
 
         # Handle implicit multiplication (e.g., "2pi" -> "2*pi")
-        import re
 
         expression = re.sub(r"(\d+)([a-z])", r"\1*\2", expression)
         expression = re.sub(r"([a-z])(\d+)", r"\1*\2", expression)
@@ -171,7 +174,7 @@ class CalculatorTool(BaseTool):
             return self._eval_node(tree.body)
 
         except SyntaxError as e:
-            raise ValueError(f"Invalid expression syntax: {e!s}")
+            raise ValueError(f"Invalid expression syntax: {e!s}") from e
 
     def _eval_node(self, node: ast.AST) -> float | int:
         """Recursively evaluate an AST node."""
@@ -215,7 +218,7 @@ class CalculatorTool(BaseTool):
             return [self._eval_node(item) for item in node.elts]
 
         else:
-            raise ValueError(f"Unsupported expression type: {type(node).__name__}")
+            raise TypeError(f"Unsupported expression type: {type(node).__name__}")
 
     def _format_result(self, expression: str, result: float | int) -> str:
         """Format the calculation result for display."""

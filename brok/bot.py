@@ -11,7 +11,13 @@ import time
 from typing import TYPE_CHECKING
 
 from brok.exceptions import BrokError, LLMProviderError, LLMTimeoutError
-from brok.tools import CalculatorTool, ToolParser, ToolRegistry, WeatherTool
+from brok.tools import (
+    CalculatorTool,
+    DateTimeTool,
+    ToolParser,
+    ToolRegistry,
+    WeatherTool,
+)
 
 if TYPE_CHECKING:
     from brok.chat import ChatClient
@@ -178,6 +184,10 @@ class ChatBot:
             # Register calculator tool
             calculator_tool = CalculatorTool()
             self._tool_registry.register_tool(calculator_tool)
+
+            # Register datetime tool
+            datetime_tool = DateTimeTool()
+            self._tool_registry.register_tool(datetime_tool)
 
             # Set up tool parser with available tools
             available_tools = self._tool_registry.get_available_tools()
@@ -370,9 +380,9 @@ class ChatBot:
                         consecutive_failures = 0
                         self._stats.chat_reconnections += 1
 
-                    except Exception as e:
+                    except Exception:
                         consecutive_failures += 1
-                        logger.exception(f"Chat reconnection failed: {e}")
+                        logger.exception("Chat reconnection failed")
                         self._stats.errors_count += 1
 
                         # Increase delay with exponential backoff
