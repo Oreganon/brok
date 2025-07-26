@@ -29,6 +29,7 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["brok"]
+include = ["main.py"]
 
 [tool.ruff]
 target-version = "py313"
