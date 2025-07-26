@@ -6,13 +6,15 @@ WORKDIR /app
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+    build-essential git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pyproject.toml first for better layer caching
+# Copy source code for installation
 COPY pyproject.toml .
+COPY main.py .
+COPY brok/ ./brok/
 
-# Install dependencies
+# Install the package
 RUN pip install --no-cache-dir --user .
 
 # Runtime stage using distroless
@@ -21,15 +23,11 @@ FROM gcr.io/distroless/python3-debian12:latest
 # Copy the installed packages from builder stage
 COPY --from=builder /root/.local /root/.local
 
-# Copy application code
-COPY main.py /app/
-
 # Set working directory
 WORKDIR /app
 
 # Make sure scripts in .local are usable
 ENV PATH=/root/.local/bin:$PATH
-ENV PYTHONPATH=/app
 
 # Set the entrypoint
-ENTRYPOINT ["python", "main.py"] 
+ENTRYPOINT ["brok"] 
