@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -164,14 +165,14 @@ class TestChatBot:
         async def mock_get_next_message():
             try:
                 return await asyncio.wait_for(message_queue.get(), timeout=0.1)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Simulate the timeout that would happen in the worker
-                raise asyncio.TimeoutError()
+                raise TimeoutError() from None
 
         mock_chat_client.get_next_message.side_effect = mock_get_next_message
 
         # Mock LLM to return chunks
-        async def mock_generate(prompt, context):
+        async def mock_generate(_prompt, _context):
             yield "Hello! "
             yield "How can I help you?"
 
@@ -194,7 +195,7 @@ class TestChatBot:
         # Wait for worker to finish
         try:
             await asyncio.wait_for(worker_task, timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             worker_task.cancel()
 
         # Assert
@@ -222,8 +223,8 @@ class TestChatBot:
         async def mock_get_next_message():
             try:
                 return await asyncio.wait_for(message_queue.get(), timeout=0.1)
-            except asyncio.TimeoutError:
-                raise asyncio.TimeoutError()
+            except TimeoutError:
+                raise TimeoutError() from None
 
         mock_chat_client.get_next_message.side_effect = mock_get_next_message
 
@@ -240,7 +241,7 @@ class TestChatBot:
 
         try:
             await asyncio.wait_for(worker_task, timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             worker_task.cancel()
 
         # Assert
@@ -271,13 +272,13 @@ class TestChatBot:
         async def mock_get_next_message():
             try:
                 return await asyncio.wait_for(message_queue.get(), timeout=0.1)
-            except asyncio.TimeoutError:
-                raise asyncio.TimeoutError()
+            except TimeoutError:
+                raise TimeoutError() from None
 
         mock_chat_client.get_next_message.side_effect = mock_get_next_message
 
         # Mock LLM to return empty generator
-        async def empty_generate(prompt, context):
+        async def empty_generate(_prompt, _context):
             # Empty async generator - no yields
             if False:  # Never execute
                 yield
@@ -296,7 +297,7 @@ class TestChatBot:
 
         try:
             await asyncio.wait_for(worker_task, timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             worker_task.cancel()
 
         # Assert - Should not send empty message
@@ -325,7 +326,7 @@ class TestChatBot:
 
         try:
             await asyncio.wait_for(monitor_task, timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             monitor_task.cancel()
 
         # Assert
@@ -348,7 +349,7 @@ class TestChatBot:
 
         try:
             await asyncio.wait_for(stats_task, timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             stats_task.cancel()
 
         # Assert - Just verify it doesn't crash
@@ -401,10 +402,8 @@ class TestChatBot:
         await asyncio.sleep(0.1)
         shutdown_task.cancel()
 
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await shutdown_task
-        except asyncio.CancelledError:
-            pass
 
         # Assert - Just verify the method structure is correct
         assert True

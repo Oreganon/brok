@@ -48,7 +48,7 @@ class LLMProvider(ABC):
     @abstractmethod
     async def generate(
         self, prompt: str, context: str | None = None
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str]:
         """Generate response as async generator.
 
         Yields incremental text chunks for streaming, or final response.
