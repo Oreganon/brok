@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from wsggpy import AsyncSession, ChatEnvironment, Message, RoomAction
@@ -168,6 +170,28 @@ class ParsedCommand:
     full_text: str
 
 
+@dataclass
+class ContextMessage:
+    """Simple message with essential metadata for enhanced context management.
+
+    This data structure supports KEP-001 Increment A by providing structured
+    message storage while maintaining backward compatibility.
+
+    Attributes:
+        content: The message text content
+        sender: Username of the message sender
+        timestamp: When the message was created
+        is_bot: Whether this message was sent by the bot
+        message_id: Unique identifier for the message
+    """
+
+    content: str
+    sender: str
+    timestamp: datetime
+    is_bot: bool
+    message_id: str = field(default_factory=lambda: str(time.time_ns()))
+
+
 class ChatClient:
     """Strims chat client wrapper with message processing.
 
@@ -191,6 +215,10 @@ class ChatClient:
         respond_to_mentions: bool = True,
         respond_to_commands: bool = True,
         ignore_users: list[str] | None = None,
+        enhanced_context: bool = False,
+        max_context_tokens: int = 500,
+        prioritize_mentions: bool = True,
+        include_bot_responses: bool = True,
     ):
         """Initialize chat client.
 
@@ -201,18 +229,33 @@ class ChatClient:
             respond_to_mentions: Whether to respond to mentions
             respond_to_commands: Whether to parse and respond to commands
             ignore_users: List of usernames to ignore (bot name is automatically added)
+            enhanced_context: Feature flag for structured context (KEP-001)
+            max_context_tokens: Maximum tokens to include in context
+            prioritize_mentions: Whether to prioritize mentions in context
+            include_bot_responses: Whether to include bot responses in context
         """
         self._filters = response_filters
         self._context_window_size = context_window_size
         self._bot_name = bot_name
         self._respond_to_mentions = respond_to_mentions
         self._respond_to_commands = respond_to_commands
+        
+        # Enhanced context settings (KEP-001)
+        self._enhanced_context = enhanced_context
+        self._max_context_tokens = max_context_tokens
+        self._prioritize_mentions = prioritize_mentions
+        self._include_bot_responses = include_bot_responses
 
         # Initialize ignore_users list and automatically add bot name (all lowercase for case-insensitive matching)
         self._ignore_users = {user.lower() for user in (ignore_users or [])}
         self._ignore_users.add(bot_name.lower())  # Add bot name (case-insensitive)
 
-        self._context_messages: list[str] = []
+        # Context storage - always initialize both, choose which to use based on flag
+        self._context_messages_structured: deque[ContextMessage] = deque(
+            maxlen=context_window_size if enhanced_context else 0
+        )
+        self._context_messages_legacy: list[str] = []
+            
         self._processing_queue: asyncio.Queue[ProcessedMessage] = asyncio.Queue()
         self._session: AsyncSession | None = None
         self._is_connected = False
@@ -332,37 +375,75 @@ class ChatClient:
 
         return False, "keyword", None
 
-    async def add_message_to_context(self, message: str, sender: str) -> None:
+    async def add_message_to_context(
+        self, message: str, sender: str, is_bot: bool = False
+    ) -> None:
         """Add message to rolling context window.
 
         Maintains a sliding window of recent chat messages for providing
-        context to the LLM.
+        context to the LLM. Supports both legacy and enhanced context modes.
 
         Args:
             message: The chat message text
             sender: Username of the sender
+            is_bot: Whether this message is from the bot (KEP-001)
         """
-        formatted = f"{sender}: {message}"
-        self._context_messages.append(formatted)
+        if self._enhanced_context:
+            # Enhanced context mode (KEP-001) - use structured ContextMessage
+            context_msg = ContextMessage(
+                content=message, sender=sender, timestamp=datetime.now(), is_bot=is_bot
+            )
+            self._context_messages_structured.append(context_msg)
 
-        # Maintain window size
-        if len(self._context_messages) > self._context_window_size:
-            self._context_messages.pop(0)
+            logger.debug(
+                f"Added to enhanced context: {sender}: {message} (is_bot={is_bot}, "
+                f"window size: {len(self._context_messages_structured)})"
+            )
+        else:
+            # Legacy context mode - maintain backward compatibility
+            formatted = f"{sender}: {message}"
+            self._context_messages_legacy.append(formatted)
 
-        logger.debug(
-            f"Added to context: {formatted} (window size: {len(self._context_messages)})"
-        )
+            # Maintain window size for legacy mode
+            if len(self._context_messages_legacy) > self._context_window_size:
+                self._context_messages_legacy.pop(0)
 
-    def get_context(self) -> str | None:
+            logger.debug(
+                f"Added to legacy context: {formatted} (window size: {len(self._context_messages_legacy)})"
+            )
+
+    def get_context(self, current_sender: str | None = None) -> str | None:  # noqa: ARG002
         """Get current conversation context as a formatted string.
+
+        Supports both legacy and enhanced context modes while maintaining
+        backward compatibility by returning the same string format.
+
+        Args:
+            current_sender: Optional sender for mention prioritization (KEP-001)
 
         Returns:
             str | None: Formatted context or None if no context available
         """
-        if not self._context_messages:
-            return None
+        if self._enhanced_context:
+            # Enhanced context mode (KEP-001) - format structured messages
+            if not self._context_messages_structured:
+                return None
 
-        return "\n".join(self._context_messages)
+            # For Increment A, maintain simple behavior - just format messages
+            # Future increments will add mention prioritization and token limits
+            formatted_messages = []
+            for ctx_msg in self._context_messages_structured:
+                if not self._include_bot_responses and ctx_msg.is_bot:
+                    continue
+                formatted_messages.append(f"{ctx_msg.sender}: {ctx_msg.content}")
+
+            return "\n".join(formatted_messages) if formatted_messages else None
+        else:
+            # Legacy context mode - maintain exact existing behavior
+            if not self._context_messages_legacy:
+                return None
+
+            return "\n".join(self._context_messages_legacy)
 
     async def send_message(self, message: str) -> None:
         """Send message to chat.
@@ -426,7 +507,7 @@ class ChatClient:
 
             # Add to context (non-blocking)
             _context_task = asyncio.create_task(  # noqa: RUF006
-                self.add_message_to_context(content, sender)
+                self.add_message_to_context(content, sender, is_bot=False)
             )
 
             # Check if we should respond (non-blocking check)

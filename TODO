@@ -1,0 +1,377 @@
+# BROK TODO - Implementation Plans
+
+## ✅ COMPLETED FEATURES
+
+### ✅ Self-Prompting Prevention (January 2025)
+- **Status**: Fully implemented and tested
+- **Description**: Bot now ignores its own messages and configured ignore_users to prevent infinite loops
+- **Implementation**: 
+  - Added `ignore_users` parameter to `ChatClient`
+  - Automatic bot name addition to ignore list (case-insensitive)
+  - Enhanced `should_respond_to_message()` with ignore logic
+  - Comprehensive test coverage
+- **Files modified**: `brok/chat.py`, `brok/main.py`, `tests/test_chat.py`
+
+### ✅ Improved Prompt System (January 2025)
+- **Status**: Fully implemented and tested
+- **Description**: Centralized prompt management system with configurable response styles for better chat experience
+- **Implementation**:
+  - Created `brok/prompts.py` with PromptTemplate class and factory functions
+  - Added 4 built-in prompt styles: concise (default), detailed, adaptive, custom
+  - Enhanced BotConfig with `prompt_style` and `custom_system_prompt` configuration
+  - Reduced default `llm_max_tokens` from 150 to 100 for shorter responses
+  - Updated LLM providers (Ollama/LlamaCpp) with PromptTemplate support
+  - Added environment variable support: `PROMPT_STYLE`, `CUSTOM_SYSTEM_PROMPT`
+  - Case-insensitive prompt style configuration for user friendliness
+  - Comprehensive test coverage: 25 prompt tests + 19 config tests
+- **System Prompts**:
+  - Concise: Encourages 2-3 sentence responses, friendly but brief
+  - Detailed: Provides thorough responses with examples when appropriate
+  - Adaptive: Adjusts response length based on question complexity  
+  - Custom: Allows user-defined system prompts via configuration
+- **Files modified**: `brok/config.py`, `brok/main.py`, `brok/llm/ollama.py`, `brok/llm/llamacpp.py`, `tests/test_config.py`
+- **Files added**: `brok/prompts.py`, `tests/test_prompts.py`
+
+### ✅ Tool Calling System (January 2025)
+- **Status**: Fully implemented and tested
+- **Description**: Comprehensive tool calling framework enabling the bot to access external APIs and services for real-time information
+- **Implementation**:
+  - Created complete `brok/tools/` module with extensible architecture
+  - Implemented `BaseTool` abstract base class with standardized interface
+  - Built `ToolRegistry` for tool management, discovery, and execution
+  - Developed multi-format `ToolParser` supporting JSON, natural language, and explicit formats
+  - Integrated tool system into LLM providers (Ollama and LlamaCpp)
+  - Enhanced prompt templates to include tool descriptions and usage instructions
+  - Added tool configuration options to `BotConfig` with `enable_tools` setting
+  - Fixed critical JSON parsing bug where tool requests were sent as raw responses
+  - Comprehensive test coverage with 369 lines of tests including edge cases
+- **Available Tools**:
+  - **WeatherTool**: Real-time weather data using wttr.in API (no API key required)
+  - **CalculatorTool**: Safe mathematical expression evaluation with support for arithmetic, trigonometry, and constants
+- **Supported Input Formats**:
+  - Natural language: "what's the weather in Tokyo?", "calculate 2 + 3 * 4"
+  - JSON format: `{"tool": "weather", "params": {"city": "Tokyo"}}`
+  - Explicit format: `[TOOL:weather] city=Tokyo [/TOOL]`
+- **Architecture Features**:
+  - Extensible `BaseTool` class for easy addition of new tools
+  - Robust error handling and logging for debugging
+  - Parameter validation with JSON schema support
+  - Graceful fallback when tools are unavailable
+  - Backward compatible with existing chat functionality
+- **Files added**: `brok/tools/__init__.py`, `brok/tools/base.py`, `brok/tools/registry.py`, `brok/tools/parser.py`, `brok/tools/weather.py`, `brok/tools/calculator.py`, `tests/test_tools.py`
+- **Files modified**: `brok/bot.py`, `brok/config.py`, `brok/llm/base.py`, `brok/llm/ollama.py`, `brok/llm/llamacpp.py`, `brok/prompts.py`, `tests/test_bot.py`
+
+---
+
+## 1. User and Emote Context (bot should know about users and emotes)
+
+**Goal**: Add user awareness and emote understanding to make conversations more natural.
+
+**Implementation Plan**:
+
+### Phase 1: User Context System
+1. **Create user management**:
+   - Add `brok/users/` directory
+   - `brok/users/manager.py` - User profile management
+   - `brok/users/memory.py` - Conversation memory and preferences
+   - `brok/users/emotes.py` - Emote detection and interpretation
+
+2. **User profile structure**:
+   ```python
+   @dataclass
+   class UserProfile:
+       username: str
+       first_seen: datetime
+       last_seen: datetime
+       message_count: int
+       preferences: dict  # Language, topics, interaction style
+       conversation_history: list[str]  # Recent interactions
+       emote_usage: dict[str, int]  # Emote frequency
+   ```
+
+3. **Emote detection and interpretation**:
+   - Parse strims.gg emote format (e.g., `:PogChamp:`, `OMEGALUL`)
+   - Maintain emote database with meanings/emotions
+   - Interpret emote context in messages
+   - Add emote usage to user profiles
+
+4. **Integrate user context into prompts**:
+   - Include user info in prompt: "User {username} (regular chatter, likes gaming topics):"
+   - Add conversation history context
+   - Include recent emote usage to understand user mood
+
+### Phase 2: Enhanced User Features
+1. **User memory across sessions**:
+   - Store user profiles in local database (SQLite)
+   - Remember user preferences and conversation topics
+   - Implement conversation continuity
+
+2. **Emote response system**:
+   - Bot can respond with appropriate emotes
+   - Learn popular emotes from chat
+   - Understand emote combinations and context
+
+3. **Social awareness**:
+   - Track user interactions and relationships
+   - Understand group conversations vs direct messages
+   - Adapt responses based on chat activity level
+
+### Phase 3: Advanced User Intelligence
+1. **Personality modeling**: Learn individual user communication styles
+2. **Topic tracking**: Remember what users like to discuss
+3. **Mood detection**: Understand user emotional state from messages and emotes
+4. **Personalized responses**: Tailor responses to individual users
+
+**Files to modify**: `brok/chat.py`, `brok/bot.py`, `brok/llm/base.py`, `brok/config.py`
+**New files**: `brok/users/` directory structure
+**Database**: Add SQLite for user profile persistence
+**Dependencies**: Add database libraries to `pyproject.toml`
+
+---
+
+## 2. Fix Self Prompting (bot shouldn't prompt itself) ✅ COMPLETED
+
+**Goal**: Prevent the bot from responding to its own messages to avoid infinite loops.
+
+**✅ COMPLETED IMPLEMENTATION**:
+
+### ✅ Phase 1: Immediate Fix - COMPLETED
+1. **✅ Add bot name to ignore list**:
+   - ✅ Modified `ChatClient.should_respond_to_message()` to check ignored users
+   - ✅ Added `ignore_users` parameter to `ChatClient.__init__()`
+   - ✅ Automatically adds bot name to ignore list during initialization
+   - ✅ Case-insensitive matching for both bot name and configured ignore users
+
+2. **✅ Enhanced sender filtering**:
+   ```python
+   # Skip messages from ignored users (including the bot itself)
+   if sender.lower() in self._ignore_users:
+       logger.debug(f"Ignoring message from ignored user: {sender}")
+       return False, "ignored", None
+   ```
+
+3. **✅ Update configuration**:
+   - ✅ Bot name automatically added to `ignore_users` during initialization
+   - ✅ `ignore_users` config option passed from `BotConfig` to `ChatClient`
+   - ✅ Added debug logging for ignored messages
+
+4. **✅ Testing and validation**:
+   - ✅ Added comprehensive tests for self-prompting prevention
+   - ✅ Test bot ignoring its own messages
+   - ✅ Test bot ignoring configured ignore_users 
+   - ✅ Test case-insensitive user matching
+   - ✅ All tests passing
+
+**✅ Files modified**: `brok/chat.py`, `brok/main.py`, `tests/test_chat.py`
+**✅ Implementation complete**: Bot now prevents self-prompting loops
+
+### Phase 2: Advanced Prevention (Future Enhancement)
+1. **Message tracking** (optional future enhancement):
+   - Track bot's own sent messages by message ID or content hash
+   - Implement circular buffer of recent bot messages
+   - Prevent responses to recently sent bot messages
+
+2. **Loop detection** (optional future enhancement):
+   - Detect conversation loops between bot and users
+   - Implement cooldown periods for repeated similar responses
+   - Add circuit breaker for rapid-fire message exchanges
+
+**Status**: Phase 1 complete and sufficient for current needs. Phase 2 can be implemented later if more sophisticated loop prevention is needed.
+
+---
+
+## 3. Message Queueing (how do we handle multiple mentions and process them each)
+
+**Goal**: Implement robust message queueing to handle multiple simultaneous mentions and ensure each message is processed properly without loss or duplication.
+
+**Implementation Plan**:
+
+### Phase 1: Queue Analysis and Enhancement
+1. **Analyze current queueing system**:
+   - Current implementation uses `asyncio.Queue` in `ChatClient._processing_queue`
+   - Messages are queued in `_maybe_queue_message()` and processed by `ChatBot._llm_worker()`
+   - Multiple workers already exist (`llm_max_concurrent_requests` controls worker count)
+
+2. **Identify current limitations**:
+   - No message deduplication
+   - No priority handling for different message types
+   - No overflow protection for high-volume periods
+   - Limited observability into queue state
+
+3. **Add queue monitoring and metrics**:
+   ```python
+   @dataclass
+   class QueueMetrics:
+       current_size: int
+       max_size_reached: int
+       messages_processed: int
+       messages_dropped: int
+       average_wait_time: float
+       processing_rate: float  # messages per second
+   ```
+
+### Phase 2: Enhanced Message Processing
+1. **Message deduplication**:
+   - Add message fingerprinting based on content hash + sender + timestamp
+   - Implement sliding window for duplicate detection (e.g., 30-second window)
+   - Skip processing duplicate messages within the window
+
+2. **Priority queueing system**:
+   ```python
+   from enum import IntEnum
+   
+   class MessagePriority(IntEnum):
+       LOW = 1      # keyword matches
+       MEDIUM = 2   # mentions  
+       HIGH = 3     # direct commands
+       URGENT = 4   # admin commands
+   
+   @dataclass
+   class PriorityMessage:
+       message: ProcessedMessage
+       priority: MessagePriority
+       queued_at: float
+   ```
+
+3. **Replace simple queue with priority queue**:
+   - Use `asyncio.PriorityQueue` or custom implementation
+   - Process higher priority messages first
+   - Implement fair scheduling to prevent low-priority starvation
+
+### Phase 3: Scalability and Reliability
+1. **Queue overflow protection**:
+   - Set maximum queue size (e.g., 100 messages)
+   - Implement overflow strategies:
+     - Drop oldest low-priority messages
+     - Drop duplicate messages more aggressively
+     - Rate limiting per user (prevent spam)
+
+2. **Enhanced worker management**:
+   ```python
+   class WorkerPool:
+       def __init__(self, min_workers: int, max_workers: int):
+           self.min_workers = min_workers
+           self.max_workers = max_workers
+           self.current_workers = min_workers
+           
+       async def scale_up_if_needed(self):
+           """Add workers if queue is backing up"""
+           
+       async def scale_down_if_idle(self):
+           """Remove excess workers during low activity"""
+   ```
+
+3. **Backpressure handling**:
+   - Monitor queue depth and processing rate
+   - Temporarily reduce responsiveness when overwhelmed
+   - Add circuit breaker for extreme load conditions
+
+### Phase 4: Advanced Features
+1. **Message batching for efficiency**:
+   - Group similar messages from same user
+   - Batch process multiple mentions in single LLM call
+   - Intelligent context merging for related messages
+
+2. **Persistent queue (optional)**:
+   - Store queue state to disk for crash recovery
+   - Resume processing after bot restart
+   - Handle long-running operations gracefully
+
+3. **Load balancing across multiple bot instances**:
+   - Shared queue using Redis or similar
+   - Distribute messages across multiple bot processes
+   - Coordinate response sending to avoid duplicates
+
+### Phase 5: Monitoring and Observability
+1. **Queue health monitoring**:
+   - Expose queue metrics via health check endpoint
+   - Log queue state periodically
+   - Alert on queue backup or processing delays
+
+2. **Performance optimization**:
+   - Profile message processing pipeline
+   - Optimize hot paths in queue handling
+   - Cache frequently accessed data
+
+3. **User experience improvements**:
+   - Show typing indicators for queued messages
+   - Provide "position in queue" information for long waits
+   - Graceful degradation during high load
+
+**Current State Analysis**:
+- ✅ Basic queue exists (`_processing_queue`)
+- ✅ Multiple workers supported
+- ❌ No message deduplication
+- ❌ No priority handling
+- ❌ Limited overflow protection
+- ❌ Minimal queue observability
+
+**Files to modify**: `brok/chat.py`, `brok/bot.py`, `brok/config.py`
+**New files**: `brok/queue/` directory for queue management components
+**Tests needed**: Queue behavior under load, deduplication, priority ordering
+**Configuration**: Add queue size limits, worker scaling parameters
+**Monitoring**: Add queue metrics to bot stats
+
+---
+
+## Implementation Priority
+
+1. **✅ COMPLETED**: Fix self prompting (prevents infinite loops and message spam)
+2. **✅ COMPLETED**: Improved prompt system (better chat experience with configurable response styles)
+3. **✅ COMPLETED**: Tool calling system (comprehensive tool framework with weather and calculator tools)
+4. **High Priority**: Message queueing Phase 1 (prevents message loss, improves reliability)
+5. **Medium Priority**: Message queueing Phase 2-3 (scalability and reliability)
+6. **Lower Priority**: User and emote context (nice-to-have enhancement)
+7. **Lower Priority**: Message queueing Phase 4-5 (advanced features)
+8. **Future Enhancement**: Self-prompting Phase 2 (advanced loop detection, if needed)
+9. **Future Enhancement**: Tool calling Phase 3 (tool chaining, persistent state, user-specific tools)
+
+## Dependencies to Add
+
+- SQLite for user profiles (built-in to Python)
+- Emote parsing libraries (custom implementation)
+- Redis (optional, for distributed queue in Phase 4)
+- Queue monitoring libraries (for observability)
+
+## Configuration Changes Needed
+
+- ✅ ~~Add tool-related config options~~ (COMPLETED)
+- ✅ ~~Add prompt customization options~~ (COMPLETED)
+- Add user context settings
+- ✅ ~~Update ignore_users behavior~~ (COMPLETED)
+- Add queue management settings (max size, worker scaling, deduplication window)
+- Add priority queue configuration options
+
+## Future Improvements for Completed Features
+
+### Self-Prompting Prevention Enhancements
+- **Message deduplication**: Prevent duplicate responses to the same message within a time window
+- **Rate limiting**: Implement per-user cooldowns to prevent spam
+- **Loop detection**: Detect conversation loops between users and bot
+- **Admin override**: Allow admins to bypass ignore lists for debugging
+- **Dynamic ignore lists**: Support adding/removing users from ignore list via chat commands
+- **Ignore patterns**: Support regex patterns for ignoring users (e.g., ignore all bots matching `*bot*` pattern)
+
+### Improved Prompt System Enhancements  
+- **Context-aware prompts**: Adjust response style based on conversation context and user history
+- **Dynamic response adaptation**: Shorter prompts for simple questions, longer for complex topics
+- **Message type-based prompts**: Different prompt styles for commands vs mentions vs keywords
+- **Response post-processing**: Intelligent truncation with "more details" options
+- **Prompt analytics**: Track which prompt styles work best for different scenarios
+- **A/B testing**: Compare effectiveness of different prompt variations
+- **Custom user prompts**: Allow individual users to set preferred response styles
+- **Prompt templates per topic**: Specialized prompts for coding, general chat, help, etc.
+
+### Tool Calling System Enhancements
+- **Tool chaining**: Allow tools to call other tools for complex multi-step operations
+- **Persistent tool state**: Store tool results for future reference and context
+- **User-specific tools**: Tools that remember user preferences and history
+- **Tool discovery**: Dynamic tool loading from plugins or external modules
+- **Advanced parsing**: Support for more complex tool call formats and nested parameters
+- **Tool rate limiting**: Prevent excessive API calls and implement cooldowns
+- **Tool caching**: Cache tool results to reduce API calls and improve response times
+- **Tool analytics**: Track tool usage patterns and performance metrics
+- **Custom tools**: Allow users to define and register their own tools
+- **Tool permissions**: Role-based access control for different tools
+- **Tool streaming**: Support for streaming responses from long-running tools
+- **Tool composition**: Combine multiple tools into workflow templates

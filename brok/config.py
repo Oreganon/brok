@@ -33,6 +33,12 @@ class BotConfig:
     ignore_users: list[str] = field(default_factory=list)
     context_window_size: int = 10
 
+    # Enhanced context settings (KEP-001)
+    enhanced_context: bool = False  # Feature flag for structured context
+    max_context_tokens: int = 500
+    prioritize_mentions: bool = True
+    include_bot_responses: bool = True
+
     # Prompt settings
     prompt_style: str = "concise"  # "concise", "detailed", "adaptive", or "custom"
     custom_system_prompt: str | None = None  # Used when prompt_style is "custom"
@@ -145,6 +151,16 @@ class BotConfig:
                 os.getenv("BOT_RESPOND_TO_COMMANDS", "true").lower() == "true"
             )
 
+            # Parse enhanced context settings (KEP-001)
+            enhanced_context = os.getenv("ENHANCED_CONTEXT", "false").lower() == "true"
+            max_context_tokens = cls._parse_positive_int("MAX_CONTEXT_TOKENS", "500")
+            prioritize_mentions = (
+                os.getenv("PRIORITIZE_MENTIONS", "true").lower() == "true"
+            )
+            include_bot_responses = (
+                os.getenv("INCLUDE_BOT_RESPONSES", "true").lower() == "true"
+            )
+
             # Parse prompt configuration
             prompt_style = os.getenv("PROMPT_STYLE", "concise").lower()
             if prompt_style not in ("concise", "detailed", "adaptive", "custom"):
@@ -174,6 +190,10 @@ class BotConfig:
                 respond_to_commands=respond_to_commands,
                 ignore_users=ignore_users,
                 context_window_size=context_window_size,
+                enhanced_context=enhanced_context,
+                max_context_tokens=max_context_tokens,
+                prioritize_mentions=prioritize_mentions,
+                include_bot_responses=include_bot_responses,
                 prompt_style=prompt_style,
                 custom_system_prompt=custom_system_prompt,
                 max_reconnect_attempts=max_reconnect_attempts,
