@@ -106,3 +106,29 @@ class LLMProvider(ABC):
             >>> print(f"Used {metadata.get('tokens_used', 0)} tokens")
         """
         return {}
+
+    def set_tool_registry(self, registry: "ToolRegistry") -> None:
+        """Set the tool registry for this LLM provider.
+
+        Args:
+            registry: Tool registry instance
+        """
+        self.tool_registry = registry
+
+    def has_tools(self) -> bool:
+        """Check if this provider has tools available.
+
+        Returns:
+            bool: True if tools are available
+        """
+        return hasattr(self, "tool_registry") and self.tool_registry is not None
+
+    def get_tools_description(self) -> str:
+        """Get description of available tools for prompt inclusion.
+
+        Returns:
+            str: Description of available tools, empty string if none
+        """
+        if self.has_tools():
+            return self.tool_registry.get_tools_description()
+        return ""

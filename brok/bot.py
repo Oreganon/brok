@@ -11,6 +11,7 @@ import time
 from typing import TYPE_CHECKING
 
 from brok.exceptions import BrokError, LLMProviderError, LLMTimeoutError
+from brok.tools import CalculatorTool, ToolParser, ToolRegistry, WeatherTool
 
 if TYPE_CHECKING:
     from brok.chat import ChatClient
@@ -30,21 +31,21 @@ class BotStats:
         errors_count: Total number of errors encountered
         start_time: Bot start timestamp
         last_activity: Timestamp of last message processed
-        
+
         # Performance metrics
         avg_response_time: Average LLM response time in seconds
         total_response_time: Cumulative response time for averaging
         max_response_time: Maximum response time observed
         min_response_time: Minimum response time observed
-        
+
         # Resource metrics
         current_queue_size: Current message queue depth
         max_queue_size: Maximum queue depth observed
-        
+
         # Provider-specific metrics
         llm_timeouts: Number of LLM timeout errors
         chat_reconnections: Number of chat reconnection attempts
-        
+
         # Message type breakdown
         command_messages: Messages parsed as commands
         mention_messages: Messages containing mentions
@@ -57,56 +58,56 @@ class BotStats:
     errors_count: int = 0
     start_time: float = 0.0
     last_activity: float = 0.0
-    
+
     # Performance metrics
     avg_response_time: float = 0.0
     total_response_time: float = 0.0
     max_response_time: float = 0.0
-    min_response_time: float = float('inf')
-    
+    min_response_time: float = float("inf")
+
     # Resource metrics
     current_queue_size: int = 0
     max_queue_size: int = 0
-    
+
     # Provider-specific metrics
     llm_timeouts: int = 0
     chat_reconnections: int = 0
-    
+
     # Message type breakdown
     command_messages: int = 0
     mention_messages: int = 0
     keyword_messages: int = 0
-    
+
     def update_response_time(self, response_time: float) -> None:
         """Update response time statistics.
-        
+
         Args:
             response_time: Response time in seconds
         """
         self.total_response_time += response_time
         self.max_response_time = max(self.max_response_time, response_time)
-        
-        if self.min_response_time == float('inf'):
+
+        if self.min_response_time == float("inf"):
             self.min_response_time = response_time
         else:
             self.min_response_time = min(self.min_response_time, response_time)
-        
+
         # Calculate running average
         if self.responses_sent > 0:
             self.avg_response_time = self.total_response_time / self.responses_sent
-    
+
     def update_queue_size(self, current_size: int) -> None:
         """Update queue size statistics.
-        
+
         Args:
             current_size: Current queue depth
         """
         self.current_queue_size = current_size
         self.max_queue_size = max(self.max_queue_size, current_size)
-    
+
     def increment_message_type(self, message_type: str) -> None:
         """Increment counter for specific message type.
-        
+
         Args:
             message_type: Type of message ("command", "mention", "keyword")
         """
@@ -157,6 +158,99 @@ class ChatBot:
         self._llm_provider = llm_provider
         self._stats = BotStats()
         self._shutdown_event = asyncio.Event()
+
+        # Initialize tool system
+        self._tool_registry = ToolRegistry()
+        self._tool_parser = ToolParser()
+        self._setup_tools()
+
+    def _setup_tools(self) -> None:
+        """Initialize and register default tools."""
+        if not self._config.enable_tools:
+            logger.info("Tools are disabled in configuration")
+            return
+
+        try:
+            # Register weather tool (no API key needed for wttr.in)
+            weather_tool = WeatherTool()
+            self._tool_registry.register_tool(weather_tool)
+
+            # Register calculator tool
+            calculator_tool = CalculatorTool()
+            self._tool_registry.register_tool(calculator_tool)
+
+            # Set up tool parser with available tools
+            available_tools = self._tool_registry.get_available_tools()
+            self._tool_parser.update_available_tools(available_tools)
+
+            # Set tool registry in LLM provider
+            self._llm_provider.set_tool_registry(self._tool_registry)
+
+            logger.info(
+                f"Initialized {len(available_tools)} tools: {', '.join(available_tools)}"
+            )
+
+        except Exception:
+            logger.exception("Error setting up tools")
+            # Continue without tools if setup fails
+            logger.warning("Continuing without tool support")
+
+    async def _process_response_with_tools(self, response: str, sender: str) -> str:
+        """Process LLM response for tool calls and execute them.
+
+        Args:
+            response: The LLM response to process
+            sender: Username of the message sender
+
+        Returns:
+            str: Final response to send to chat (may include tool results)
+        """
+        # Log the response for debugging tool parsing issues
+        logger.debug(
+            f"Processing response for tools from {sender}: {response[:100]}..."
+        )
+
+        # Check if the response contains a tool call
+        tool_call = self._tool_parser.parse_response(response)
+
+        if not tool_call:
+            # Check if response looks like a tool call but wasn't parsed
+            if "tool" in response.lower() and "{" in response and "}" in response:
+                logger.warning(
+                    f"Response from {sender} looks like a tool call but wasn't parsed: {response}"
+                )
+            # No tool call detected, return original response
+            return response
+
+        logger.info(
+            f"Tool call detected from {sender}: {tool_call.tool_name} with params {tool_call.parameters}"
+        )
+
+        try:
+            # Execute the tool
+            tool_result = await self._tool_registry.execute_tool(
+                tool_call.tool_name, tool_call.parameters
+            )
+
+            logger.debug(
+                f"Tool {tool_call.tool_name} executed successfully, result length: {len(tool_result)}"
+            )
+
+            # Format the final response with tool result
+            if "error:" in tool_result.lower():
+                # Tool execution failed
+                return f"I tried to {tool_call.tool_name} but encountered an issue: {tool_result}"
+            else:
+                # Tool execution succeeded
+                return tool_result
+
+        except KeyError:
+            logger.warning(f"Unknown tool requested: {tool_call.tool_name}")
+            return f"Sorry, I don't have access to the '{tool_call.tool_name}' tool."
+
+        except Exception as e:
+            logger.exception(f"Error executing tool {tool_call.tool_name}")
+            return f"Sorry, I encountered an error while trying to help: {e!s}"
 
     async def start(self) -> None:
         """Start the chatbot with TaskGroup for clean cancellation.
@@ -284,12 +378,11 @@ class ChatBot:
                         # Increase delay with exponential backoff
                         reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
-                else:
-                    # Connection is healthy - reset failure counter
-                    if consecutive_failures > 0:
-                        logger.debug("Chat connection healthy - resetting failure counter")
-                        consecutive_failures = 0
-                        reconnect_delay = self._config.initial_reconnect_delay
+                # Connection is healthy - reset failure counter
+                elif consecutive_failures > 0:
+                    logger.debug("Chat connection healthy - resetting failure counter")
+                    consecutive_failures = 0
+                    reconnect_delay = self._config.initial_reconnect_delay
 
                 # Check again based on configured interval
                 await asyncio.sleep(self._config.connection_check_interval)
@@ -328,11 +421,11 @@ class ChatBot:
                 # Update stats with message type tracking
                 self._stats.messages_processed += 1
                 self._stats.last_activity = time.time()
-                
+
                 # Track message type for analytics
-                message_type = getattr(message, 'message_type', 'keyword')
+                message_type = getattr(message, "message_type", "keyword")
                 self._stats.increment_message_type(message_type)
-                
+
                 # Update queue size statistics
                 queue_size = self._chat_client._processing_queue.qsize()
                 self._stats.update_queue_size(queue_size)
@@ -349,12 +442,17 @@ class ChatBot:
                     # Calculate response time
                     response_time = time.time() - start_time
 
-                    # Send complete response to chat
+                    # Process response for tool calls and send to chat
                     if response_chunks:
                         full_response = "".join(response_chunks)
-                        await self._chat_client.send_message(full_response)
-                        self._stats.responses_sent += 1
-                        
+                        final_response = await self._process_response_with_tools(
+                            full_response, message.sender
+                        )
+
+                        if final_response:
+                            await self._chat_client.send_message(final_response)
+                            self._stats.responses_sent += 1
+
                         # Update response time statistics
                         self._stats.update_response_time(response_time)
 
@@ -419,19 +517,16 @@ class ChatBot:
 
             current_time = time.time()
             uptime = current_time - self._stats.start_time
-            
+
             # Calculate rates
-            message_rate = (
-                self._stats.messages_processed / uptime if uptime > 0 else 0
-            )
-            response_rate = (
-                self._stats.responses_sent / uptime if uptime > 0 else 0
-            )
+            message_rate = self._stats.messages_processed / uptime if uptime > 0 else 0
+            response_rate = self._stats.responses_sent / uptime if uptime > 0 else 0
             error_rate = (
                 self._stats.errors_count / self._stats.messages_processed
-                if self._stats.messages_processed > 0 else 0
+                if self._stats.messages_processed > 0
+                else 0
             )
-            
+
             # Enhanced logging with performance data
             logger.info(
                 f"📊 Bot Performance Stats - "
@@ -440,7 +535,7 @@ class ChatBot:
                 f"Responses: {self._stats.responses_sent} ({response_rate:.2f}/s), "
                 f"Errors: {self._stats.errors_count} ({error_rate:.1%})"
             )
-            
+
             # Performance metrics
             if self._stats.responses_sent > 0:
                 logger.info(
@@ -449,7 +544,7 @@ class ChatBot:
                     f"Min: {self._stats.min_response_time:.2f}s, "
                     f"Max: {self._stats.max_response_time:.2f}s"
                 )
-            
+
             # Queue and resource metrics
             logger.info(
                 f"📋 Resources - "
@@ -457,22 +552,22 @@ class ChatBot:
                 f"Timeouts: {self._stats.llm_timeouts}, "
                 f"Reconnections: {self._stats.chat_reconnections}"
             )
-            
+
             # Message type breakdown
             total_typed = (
-                self._stats.command_messages + 
-                self._stats.mention_messages + 
-                self._stats.keyword_messages
+                self._stats.command_messages
+                + self._stats.mention_messages
+                + self._stats.keyword_messages
             )
             if total_typed > 0:
                 logger.info(
                     f"💬 Message Types - "
                     f"Commands: {self._stats.command_messages} "
-                    f"({self._stats.command_messages/total_typed:.1%}), "
+                    f"({self._stats.command_messages / total_typed:.1%}), "
                     f"Mentions: {self._stats.mention_messages} "
-                    f"({self._stats.mention_messages/total_typed:.1%}), "
+                    f"({self._stats.mention_messages / total_typed:.1%}), "
                     f"Keywords: {self._stats.keyword_messages} "
-                    f"({self._stats.keyword_messages/total_typed:.1%})"
+                    f"({self._stats.keyword_messages / total_typed:.1%})"
                 )
 
     async def _wait_for_shutdown(self) -> None:
@@ -525,20 +620,22 @@ class ChatBot:
 
     async def get_health_status(self) -> dict[str, any]:
         """Get comprehensive health status for monitoring and debugging.
-        
+
         Returns detailed health information including:
         - Overall status and uptime
         - Performance statistics
         - Provider health status
         - Connection status
         - Resource utilization metrics
-        
+
         Returns:
             dict: Comprehensive health status information
         """
         current_time = time.time()
-        uptime_seconds = current_time - self._stats.start_time if self._stats.start_time > 0 else 0
-        
+        uptime_seconds = (
+            current_time - self._stats.start_time if self._stats.start_time > 0 else 0
+        )
+
         # Calculate additional derived metrics
         message_rate = (
             self._stats.messages_processed / uptime_seconds if uptime_seconds > 0 else 0
@@ -547,17 +644,19 @@ class ChatBot:
             self._stats.responses_sent / uptime_seconds if uptime_seconds > 0 else 0
         )
         error_rate = (
-            self._stats.errors_count / self._stats.messages_processed 
-            if self._stats.messages_processed > 0 else 0
+            self._stats.errors_count / self._stats.messages_processed
+            if self._stats.messages_processed > 0
+            else 0
         )
-        
+
         # Determine overall health status
         is_healthy = (
-            self._chat_client.is_connected() and
-            error_rate < 0.1 and  # Less than 10% error rate
-            (current_time - self._stats.last_activity) < 600  # Active within 10 minutes
+            self._chat_client.is_connected()
+            and error_rate < 0.1  # Less than 10% error rate
+            and (current_time - self._stats.last_activity)
+            < 600  # Active within 10 minutes
         )
-        
+
         # Check provider health (async)
         try:
             llm_healthy = await asyncio.wait_for(
@@ -565,19 +664,17 @@ class ChatBot:
             )
         except Exception:
             llm_healthy = False
-        
+
         return {
             "status": "healthy" if is_healthy else "unhealthy",
             "timestamp": current_time,
             "uptime_seconds": uptime_seconds,
             "uptime_formatted": f"{uptime_seconds // 3600:.0f}h {(uptime_seconds % 3600) // 60:.0f}m",
-            
             # Connection status
             "connections": {
                 "chat_connected": self._chat_client.is_connected(),
                 "llm_healthy": llm_healthy,
             },
-            
             # Core statistics
             "statistics": {
                 "messages_processed": self._stats.messages_processed,
@@ -586,36 +683,33 @@ class ChatBot:
                 "last_activity": self._stats.last_activity,
                 "time_since_last_activity": current_time - self._stats.last_activity,
             },
-            
             # Performance metrics
             "performance": {
                 "avg_response_time": round(self._stats.avg_response_time, 3),
-                "min_response_time": round(self._stats.min_response_time, 3) if self._stats.min_response_time != float('inf') else None,
+                "min_response_time": round(self._stats.min_response_time, 3)
+                if self._stats.min_response_time != float("inf")
+                else None,
                 "max_response_time": round(self._stats.max_response_time, 3),
                 "message_rate_per_second": round(message_rate, 3),
                 "response_rate_per_second": round(response_rate, 3),
                 "error_rate": round(error_rate, 3),
             },
-            
             # Resource metrics
             "resources": {
                 "current_queue_size": self._stats.current_queue_size,
                 "max_queue_size": self._stats.max_queue_size,
             },
-            
             # Provider-specific metrics
             "providers": {
                 "llm_timeouts": self._stats.llm_timeouts,
                 "chat_reconnections": self._stats.chat_reconnections,
             },
-            
             # Message type breakdown
             "message_types": {
                 "commands": self._stats.command_messages,
                 "mentions": self._stats.mention_messages,
                 "keywords": self._stats.keyword_messages,
             },
-            
             # Configuration info
             "config": {
                 "llm_provider": self._config.llm_provider,
@@ -624,10 +718,9 @@ class ChatBot:
                 "max_concurrent_requests": self._config.llm_max_concurrent_requests,
                 "context_window_size": self._config.context_window_size,
             },
-            
             # Version info
             "version": {
-                "brok": getattr(self, '__version__', '0.1.0'),
+                "brok": getattr(self, "__version__", "0.1.0"),
                 "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            }
+            },
         }

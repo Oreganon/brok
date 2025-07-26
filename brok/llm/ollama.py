@@ -186,7 +186,7 @@ class OllamaProvider(LLMProvider):
         return self._last_metadata.copy()
 
     def _build_prompt(self, prompt: str, context: str | None) -> str:
-        """Build the full prompt with optional context using the configured template.
+        """Build the full prompt with optional context and tools using the configured template.
 
         Args:
             prompt: The user's input message
@@ -195,7 +195,8 @@ class OllamaProvider(LLMProvider):
         Returns:
             str: The complete prompt to send to Ollama
         """
-        return self.prompt_template.build_prompt(prompt, context)
+        tools_description = self.get_tools_description() if self.has_tools() else None
+        return self.prompt_template.build_prompt(prompt, context, tools_description)
 
     async def close(self) -> None:
         """Close the HTTP session if we own it."""

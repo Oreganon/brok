@@ -454,9 +454,14 @@ class TestChatBotReconnection:
 
         # Assert
         assert mock_chat_client.connect.call_count >= 1
-        assert "Chat reconnection successful!" in [
-            record.getMessage() for record in chat_bot._stats.__dict__.get("log_records", [])
-        ] or True  # May not capture logs in test environment
+        assert (
+            "Chat reconnection successful!"
+            in [
+                record.getMessage()
+                for record in chat_bot._stats.__dict__.get("log_records", [])
+            ]
+            or True
+        )  # May not capture logs in test environment
 
     @pytest.mark.asyncio
     async def test_monitor_connection_exponential_backoff(
@@ -530,7 +535,11 @@ class TestChatBotReconnection:
         # Arrange
         # Simulate: disconnected -> failed reconnect -> disconnected -> successful reconnect -> connected
         connection_states = [False, False, False, True, True, True]
-        connect_results = [Exception("Failed"), None, None]  # First fails, then succeeds
+        connect_results = [
+            Exception("Failed"),
+            None,
+            None,
+        ]  # First fails, then succeeds
 
         mock_chat_client.is_connected = MagicMock(side_effect=connection_states)
         mock_chat_client.connect = AsyncMock(side_effect=connect_results)
