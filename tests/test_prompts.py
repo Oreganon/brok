@@ -359,7 +359,10 @@ class TestXMLPromptTemplate:
         )
 
         # Assert
-        assert '<context window_size="10">Previous chat messages</context>' in result
+        assert (
+            '<context window_size="10" format="legacy">Previous chat messages</context>'
+            in result
+        )
 
     def test_xml_formatting_with_tools(self):
         """Test XML formatting includes tools section with description and usage."""
@@ -402,7 +405,10 @@ class TestXMLPromptTemplate:
         # Check all sections are present
         assert '<system role="assistant" name="brok">You are helpful</system>' in result
         assert '<tools count="1">' in result
-        assert '<context window_size="10">Chat history here</context>' in result
+        assert (
+            '<context window_size="10" format="legacy">Chat history here</context>'
+            in result
+        )
         assert '<request sender="user">' in result
         assert "<user_input>What's the weather?</user_input>" in result
         assert "<response_prompt>Assistant:</response_prompt>" in result

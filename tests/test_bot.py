@@ -195,7 +195,7 @@ class TestChatBot:
                 return chunk
 
         # Mock the generate method by replacing it directly
-        async def mock_generate(_prompt, _context):
+        async def mock_generate(_prompt, _context, _context_messages):
             yield "Hello! "
             yield "How can I help you?"
 
@@ -250,7 +250,7 @@ class TestChatBot:
         mock_chat_client.get_next_message.side_effect = mock_get_next_message
 
         # Mock LLM to raise an error
-        async def mock_generate_error(_prompt, _context):
+        async def mock_generate_error(_prompt, _context, _context_messages):
             raise LLMProviderError("LLM failed")
             yield  # This never executes but makes it an async generator
 
