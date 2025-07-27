@@ -37,7 +37,6 @@ class BotStats:
         responses_sent: Total number of responses sent to chat
         errors_count: Total number of errors encountered
         start_time: Bot start timestamp
-        last_activity: Timestamp of last message processed
 
         # Performance metrics
         avg_response_time: Average LLM response time in seconds
@@ -64,7 +63,6 @@ class BotStats:
     responses_sent: int = 0
     errors_count: int = 0
     start_time: float = 0.0
-    last_activity: float = 0.0
 
     # Performance metrics
     avg_response_time: float = 0.0
@@ -433,10 +431,10 @@ class ChatBot:
                     consecutive_failures = 0
 
                 # Detect stale connections (no messages for extended periods)
-                time_since_last_activity = current_time - self._stats.last_activity
+                chat_stats = self._chat_client.get_chat_stats()
+                time_since_last_activity = current_time - chat_stats.last_activity
                 if (
-                    self._stats.last_activity
-                    > 0  # We've processed at least one message
+                    chat_stats.last_activity > 0  # We've received at least one message
                     and time_since_last_activity > message_timeout
                     and is_connected
                     and not is_reconnecting
@@ -520,7 +518,6 @@ class ChatBot:
 
                 # Update stats with message type tracking
                 self._stats.messages_processed += 1
-                self._stats.last_activity = time.time()
 
                 # Track message type for analytics
                 message_type = getattr(message, "message_type", "keyword")
@@ -752,10 +749,11 @@ class ChatBot:
         )
 
         # Determine overall health status
+        chat_stats = self._chat_client.get_chat_stats()
         is_healthy = (
             self._chat_client.is_connected()
             and error_rate < 0.1  # Less than 10% error rate
-            and (current_time - self._stats.last_activity)
+            and (current_time - chat_stats.last_activity)
             < 600  # Active within 10 minutes
         )
 
@@ -782,8 +780,8 @@ class ChatBot:
                 "messages_processed": self._stats.messages_processed,
                 "responses_sent": self._stats.responses_sent,
                 "errors_count": self._stats.errors_count,
-                "last_activity": self._stats.last_activity,
-                "time_since_last_activity": current_time - self._stats.last_activity,
+                "last_activity": chat_stats.last_activity,
+                "time_since_last_activity": current_time - chat_stats.last_activity,
             },
             # Performance metrics
             "performance": {

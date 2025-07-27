@@ -14,6 +14,7 @@ from brok.prompts import PromptTemplate, XMLPromptTemplate, get_prompt_template
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
     from brok.chat import ContextMessage
 
 logger = logging.getLogger(__name__)
@@ -211,7 +212,10 @@ class LlamaCppProvider(LLMProvider):
         return self._last_metadata.copy()
 
     def _build_prompt(
-        self, prompt: str, context: str | None, context_messages: list[ContextMessage] | None = None
+        self,
+        prompt: str,
+        context: str | None,
+        context_messages: list[ContextMessage] | None = None,
     ) -> str:
         """Build the full prompt with optional context and tools using the configured template.
 

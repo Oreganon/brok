@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from wsggpy import AsyncSession, Message, User
 
 from brok.chat import (
     ChatClient,
+    ChatStats,
     ContextMessage,
     ProcessedMessage,
     create_default_filters,
@@ -1362,3 +1365,62 @@ class TestCommandParsing:
                 assert result.args == expected_args, (
                     f"Wrong args for message: '{message}'"
                 )
+
+
+class TestChatStats:
+    """Test cases for ChatStats."""
+
+    def test_chat_stats_default_initialization(self):
+        """Test ChatStats initialization with default values."""
+        # Act
+        stats = ChatStats()
+
+        # Assert
+        assert stats.last_activity == 0.0
+        assert stats.messages_received == 0
+        assert stats.start_time == 0.0
+        assert stats.reconnections == 0
+
+    def test_chat_stats_with_values(self):
+        """Test ChatStats initialization with custom values."""
+        # Act
+        stats = ChatStats(
+            last_activity=1234567900.0,
+            messages_received=42,
+            start_time=1234567890.0,
+            reconnections=3,
+        )
+
+        # Assert
+        assert stats.last_activity == 1234567900.0
+        assert stats.messages_received == 42
+        assert stats.start_time == 1234567890.0
+        assert stats.reconnections == 3
+
+    @pytest.mark.asyncio
+    async def test_chat_client_updates_stats_on_message(self, chat_client: ChatClient):
+        """Test that chat client updates stats when receiving messages."""
+        # Arrange - Mock the wsggpy Message
+        mock_user = MagicMock(spec=User)
+        mock_user.nick = "testuser"
+
+        mock_message = MagicMock(spec=Message)
+        mock_message.sender = mock_user
+        mock_message.message = "Hello world"
+        mock_message.timestamp = time.time() * 1000  # Milliseconds
+
+        # Get initial stats
+        initial_stats = chat_client.get_chat_stats()
+        initial_count = initial_stats.messages_received
+        initial_activity = initial_stats.last_activity
+
+        # Act - Simulate message reception
+        chat_client._on_message(mock_message, MagicMock(spec=AsyncSession))
+
+        # Wait for async tasks to complete
+        await asyncio.sleep(0.1)
+
+        # Assert
+        updated_stats = chat_client.get_chat_stats()
+        assert updated_stats.messages_received == initial_count + 1
+        assert updated_stats.last_activity > initial_activity

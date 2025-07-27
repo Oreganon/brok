@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 import logging
@@ -195,6 +196,26 @@ class ContextMessage:
     message_id: str = field(default_factory=lambda: str(time.time_ns()))
 
 
+@dataclass
+class ChatStats:
+    """Runtime statistics for chat client monitoring.
+
+    Tracks chat-specific metrics like activity timestamps and message counts.
+    This separates chat concerns from bot processing concerns.
+
+    Attributes:
+        last_activity: Timestamp of last message received from chat
+        messages_received: Total messages received from chat
+        start_time: When the chat client started
+        reconnections: Number of reconnection events
+    """
+
+    last_activity: float = 0.0
+    messages_received: int = 0
+    start_time: float = 0.0
+    reconnections: int = 0
+
+
 class ChatClient:
     """Strims chat client wrapper with message processing and wsggpy auto-reconnection.
 
@@ -296,6 +317,9 @@ class ChatClient:
         self._processing_queue: asyncio.Queue[ProcessedMessage] = asyncio.Queue()
         self._session: AsyncSession | None = None
         self._is_connected = False
+
+        # Initialize chat statistics
+        self._chat_stats = ChatStats(start_time=time.time())
 
     async def connect(self, jwt_token: str | None, environment: str) -> None:
         """Connect to strims chat.
@@ -1048,6 +1072,14 @@ class ChatClient:
             logger.exception("Failed to send message")
             raise ChatConnectionError(f"Failed to send message: {e}") from e
 
+    def get_chat_stats(self) -> ChatStats:
+        """Get current chat statistics.
+
+        Returns:
+            ChatStats: Current chat activity and connection statistics
+        """
+        return self._chat_stats
+
     async def get_next_message(self) -> ProcessedMessage:
         """Get the next message from the processing queue.
 
@@ -1081,6 +1113,10 @@ class ChatClient:
                 timestamp = message.timestamp / 1000.0
 
             logger.debug(f"Received message from {sender}: {content}")
+
+            # Update chat statistics for all received messages
+            self._chat_stats.messages_received += 1
+            self._chat_stats.last_activity = time.time()
 
             # Add to context (non-blocking)
             _context_task = asyncio.create_task(  # noqa: RUF006
@@ -1208,6 +1244,7 @@ class ChatClient:
         """
         logger.info("✅ Chat reconnection successful!")
         self._is_connected = True
+        self._chat_stats.reconnections += 1
 
     def _on_reconnect_failed(self, _event: Any, _session: AsyncSession) -> None:
         """Handle failed reconnection event from wsggpy.

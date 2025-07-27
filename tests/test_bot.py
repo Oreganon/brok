@@ -82,7 +82,6 @@ class TestBotStats:
         assert stats.responses_sent == 0
         assert stats.errors_count == 0
         assert stats.start_time == 0.0
-        assert stats.last_activity == 0.0
 
     def test_bot_stats_with_values(self):
         """Test BotStats initialization with custom values."""
@@ -92,7 +91,6 @@ class TestBotStats:
             responses_sent=3,
             errors_count=1,
             start_time=1234567890.0,
-            last_activity=1234567900.0,
         )
 
         # Assert
@@ -100,7 +98,6 @@ class TestBotStats:
         assert stats.responses_sent == 3
         assert stats.errors_count == 1
         assert stats.start_time == 1234567890.0
-        assert stats.last_activity == 1234567900.0
 
 
 class TestChatBot:
