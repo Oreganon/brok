@@ -9,6 +9,9 @@ import json
 from typing import TYPE_CHECKING, Any
 import xml.etree.ElementTree as ET
 
+# Import for KEP-002 Increment D token optimization
+from brok.token_counter import get_token_counter
+
 if TYPE_CHECKING:
     from brok.chat import ContextMessage
 
@@ -430,6 +433,199 @@ class XMLPromptTemplate(PromptTemplate):
         return examples
 
 
+@dataclass
+class LightweightXMLPromptTemplate(XMLPromptTemplate):
+    """Optimized XML template for 2B parameter models (KEP-002 Increment D).
+
+    Provides extremely concise XML formatting to minimize token overhead
+    for smaller models while maintaining structured benefits.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize with token counter for optimization."""
+        super().__init__(*args, **kwargs)
+        self._token_counter = get_token_counter()
+
+    def _build_xml_prompt(
+        self,
+        user_input: str,
+        context: str | None = None,
+        tools_description: str | None = None,
+        context_messages: list[ContextMessage] | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Build extremely lightweight XML-formatted prompt for 2B models.
+
+        Optimizes for minimal token overhead while preserving structure.
+        """
+        root = ET.Element("prompt")
+
+        # Minimal system section - no verbose instructions
+        if self.system_prompt.strip():
+            system_elem = ET.SubElement(root, "system")
+            # Strip verbose XML warnings for 2B models - they understand structure
+            system_elem.text = self.system_prompt.strip()
+
+        # Ultra-compact tools section
+        if tool_schemas:
+            self._add_compact_tools(root, tool_schemas)
+        elif tools_description and tools_description.strip():
+            tools_elem = ET.SubElement(root, "tools")
+            tools_elem.text = tools_description.strip()
+
+        # Minimal context section
+        if context_messages:
+            self._add_compact_context(root, context_messages)
+        elif context and context.strip():
+            context_elem = ET.SubElement(root, "context")
+            context_elem.text = context.strip()
+
+        # Minimal request section
+        request_elem = ET.SubElement(root, "request")
+        request_elem.text = f"{user_input}\n{self.assistant_prefix}:"
+
+        return self._format_compact_xml(root)
+
+    def _add_compact_tools(
+        self, root: ET.Element, tool_schemas: list[dict[str, Any]]
+    ) -> None:
+        """Add ultra-compact tools section for 2B models."""
+        tools_elem = ET.SubElement(root, "tools")
+
+        for tool_schema in tool_schemas:
+            tool_name = tool_schema.get("name", "unknown")
+            description = tool_schema.get("description", "")
+            parameters = tool_schema.get("parameters", {})
+
+            # Minimal tool element - just name and description
+            tool_elem = ET.SubElement(tools_elem, "tool", name=tool_name)
+            tool_elem.text = description
+
+            # Only add parameters if they're complex
+            if parameters and parameters.get("properties"):
+                params_text = self._compact_params_text(parameters)
+                if params_text:
+                    tool_elem.text += f" Params: {params_text}"
+
+    def _compact_params_text(self, parameters: dict[str, Any]) -> str:
+        """Generate ultra-compact parameter description."""
+        properties = parameters.get("properties", {})
+        required = parameters.get("required", [])
+
+        param_parts = []
+        for param_name, param_schema in properties.items():
+            param_type = param_schema.get("type", "str")
+            is_required = param_name in required
+            required_marker = "*" if is_required else ""
+            param_parts.append(f"{param_name}{required_marker}:{param_type}")
+
+        return "{" + ", ".join(param_parts) + "}"
+
+    def _add_compact_context(
+        self, root: ET.Element, context_messages: list[ContextMessage]
+    ) -> None:
+        """Add ultra-compact context section for 2B models."""
+        if not context_messages:
+            return
+
+        context_elem = ET.SubElement(root, "context")
+
+        for msg in context_messages:
+            # Ultra-minimal message format
+            msg_elem = ET.SubElement(
+                context_elem,
+                "msg",
+                u=msg.sender,  # Ultra-short attribute names
+                t="b" if msg.is_bot else "u",  # b=bot, u=user
+            )
+            msg_elem.text = msg.content
+
+    def _format_compact_xml(self, root: ET.Element) -> str:
+        """Format XML with minimal whitespace for 2B models."""
+        # No indentation to save tokens
+        xml_str = ET.tostring(root, encoding="unicode")
+        return xml_str
+
+    def measure_token_efficiency(
+        self,
+        user_input: str,
+        context_messages: list[ContextMessage] | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Measure token efficiency compared to text prompt.
+
+        Returns detailed analysis of token overhead for optimization.
+        """
+        # Generate both XML and text versions
+        xml_prompt = self.build_prompt(
+            user_input=user_input,
+            xml_formatting=True,
+            context_messages=context_messages,
+            tool_schemas=tool_schemas,
+        )
+
+        text_prompt = self.build_prompt(
+            user_input=user_input,
+            xml_formatting=False,
+            context=self._context_messages_to_text(context_messages)
+            if context_messages
+            else None,
+            tools_description=self._tool_schemas_to_text(tool_schemas)
+            if tool_schemas
+            else None,
+        )
+
+        # Measure overhead
+        overhead_analysis = self._token_counter.measure_prompt_overhead(
+            xml_prompt, text_prompt
+        )
+
+        # Add 2B model specific metrics
+        xml_measurement = self._token_counter.count_tokens(xml_prompt)
+        text_measurement = self._token_counter.count_tokens(text_prompt)
+
+        overhead_analysis.update(
+            {
+                "xml_is_efficient": xml_measurement.is_efficient,
+                "text_is_efficient": text_measurement.is_efficient,
+                "generation_time_ms": xml_measurement.measurement_time_ms,
+                "recommended_for_2b": (
+                    overhead_analysis["meets_target"]
+                    and xml_measurement.is_efficient
+                    and xml_measurement.token_count
+                    < 400  # Conservative limit for 2B models
+                ),
+            }
+        )
+
+        return overhead_analysis
+
+    def _context_messages_to_text(self, messages: list[ContextMessage]) -> str:
+        """Convert structured messages to text format for comparison."""
+        if not messages:
+            return ""
+
+        text_parts = []
+        for msg in messages:
+            prefix = "🤖 " if msg.is_bot else ""
+            text_parts.append(f"{prefix}{msg.sender}: {msg.content}")
+
+        return "\n".join(text_parts)
+
+    def _tool_schemas_to_text(self, schemas: list[dict[str, Any]]) -> str:
+        """Convert tool schemas to text format for comparison."""
+        if not schemas:
+            return ""
+
+        text_parts = []
+        for schema in schemas:
+            name = schema.get("name", "unknown")
+            description = schema.get("description", "")
+            text_parts.append(f"{name}: {description}")
+
+        return "\n".join(text_parts)
+
+
 # Default system prompts for different response styles
 DEFAULT_CONCISE_PROMPT = """You are Brok, a helpful AI assistant in a chat room. When people mention or talk to you, respond to them directly and concisely in 2-3 sentences. Be friendly but brief. Avoid lengthy explanations unless specifically asked. If someone needs detailed information, offer to provide more details if needed.
 
@@ -569,3 +765,81 @@ def create_custom_xml_template(system_prompt: str) -> XMLPromptTemplate:
         user_prefix="User",
         assistant_prefix="Assistant",
     )
+
+
+def get_lightweight_xml_template(
+    style: str = "concise",
+) -> LightweightXMLPromptTemplate:
+    """Get a lightweight XML prompt template optimized for 2B models (KEP-002 Increment D).
+
+    Args:
+        style: Template style ("concise", "detailed", "adaptive")
+
+    Returns:
+        LightweightXMLPromptTemplate: Optimized template for smaller models
+    """
+    base_template = get_prompt_template(style)
+
+    return LightweightXMLPromptTemplate(
+        system_prompt=base_template.system_prompt,
+        user_prefix=base_template.user_prefix,
+        assistant_prefix=base_template.assistant_prefix,
+    )
+
+
+def create_custom_lightweight_xml_template(
+    system_prompt: str,
+) -> LightweightXMLPromptTemplate:
+    """Create a custom lightweight XML template for 2B models (KEP-002 Increment D).
+
+    Args:
+        system_prompt: Custom system prompt text
+
+    Returns:
+        LightweightXMLPromptTemplate: Custom optimized template
+    """
+    return LightweightXMLPromptTemplate(
+        system_prompt=system_prompt,
+        user_prefix="User",
+        assistant_prefix="Assistant",
+    )
+
+
+def get_optimal_xml_template(
+    style: str = "concise",
+    model_name: str = "llama3.2:3b",
+    force_lightweight: bool = False,
+) -> XMLPromptTemplate | LightweightXMLPromptTemplate:
+    """Get the optimal XML template based on model characteristics.
+
+    Automatically selects between regular XML and lightweight XML based on
+    model size and capabilities.
+
+    Args:
+        style: Template style ("concise", "detailed", "adaptive")
+        model_name: Name of the model being used
+        force_lightweight: Force lightweight template regardless of model
+
+    Returns:
+        XMLPromptTemplate: Optimal template for the model
+    """
+    # Detect 2B models that benefit from lightweight formatting
+    small_model_indicators = [
+        "1b",
+        "2b",
+        "3b",  # Parameter counts
+        "tinyllama",
+        "gemma-2b",
+        "qwen1.5-1.8b",  # Specific small models
+        "phi-",
+        "stablelm-2b",  # Model families known to be small
+    ]
+
+    is_small_model = force_lightweight or any(
+        indicator in model_name.lower() for indicator in small_model_indicators
+    )
+
+    if is_small_model:
+        return get_lightweight_xml_template(style)
+    else:
+        return get_xml_prompt_template(style)

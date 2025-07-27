@@ -16,9 +16,12 @@ from brok.prompts import (
     DEFAULT_CONCISE_PROMPT,
     DEFAULT_DETAILED_PROMPT,
     DETAILED_TEMPLATE,
+    LightweightXMLPromptTemplate,  # New import for KEP-002 Increment D
     PromptTemplate,
     XMLPromptTemplate,
     create_custom_template,
+    get_lightweight_xml_template,  # New import
+    get_optimal_xml_template,  # New import
     get_prompt_template,
 )
 from brok.tools.base import BaseTool, ToolExecutionResult
@@ -904,3 +907,352 @@ class TestStructuredToolsIntegration:
         assert '<tools count="1" format="structured">' in prompt
         assert '<tool name="test_tool" category="function">' in prompt
         assert "A test tool for integration testing" in prompt
+
+
+class TestLightweightXMLPromptTemplate:
+    """Test cases for LightweightXMLPromptTemplate class (KEP-002 Increment D)."""
+
+    def test_init_with_token_counter(self):
+        """Test LightweightXMLPromptTemplate initialization includes token counter."""
+        template = LightweightXMLPromptTemplate(system_prompt="Test system")
+
+        assert hasattr(template, "_token_counter")
+        assert template._token_counter is not None
+
+    def test_build_prompt_minimal_xml_structure(self):
+        """Test lightweight template produces minimal XML structure."""
+        template = LightweightXMLPromptTemplate(system_prompt="Be helpful.")
+
+        result = template.build_prompt(
+            user_input="Hello",
+            xml_formatting=True,
+        )
+
+        # Should be valid XML
+        root = ET.fromstring(result)
+        assert root.tag == "prompt"
+
+        # Should have minimal structure - no verbose instructions
+        system_elem = root.find("system")
+        assert system_elem is not None
+        assert system_elem.text == "Be helpful."
+
+        # Should not contain verbose XML warnings
+        assert "Do not include any XML tags" not in result
+
+    def test_build_prompt_compact_formatting(self):
+        """Test lightweight template uses compact formatting."""
+        template = LightweightXMLPromptTemplate(system_prompt="System")
+
+        result = template.build_prompt(
+            user_input="Test",
+            xml_formatting=True,
+        )
+
+        # Should have no indentation (compact formatting)
+        lines = result.split("\n")
+        non_empty_lines = [line for line in lines if line.strip()]
+
+        # Most lines should not start with whitespace (no indentation)
+        lines_with_indent = [line for line in non_empty_lines if line.startswith(" ")]
+        indent_ratio = len(lines_with_indent) / len(non_empty_lines)
+
+        # Should have minimal indentation for compactness
+        assert indent_ratio < 0.5
+
+    def test_compact_tools_minimal_structure(self):
+        """Test lightweight template creates minimal tool descriptions."""
+        template = LightweightXMLPromptTemplate(system_prompt="System")
+
+        tool_schemas = [
+            {
+                "name": "weather",
+                "description": "Get weather info",
+                "parameters": {
+                    "properties": {
+                        "city": {"type": "string", "description": "City name"},
+                        "units": {"type": "string", "description": "Temperature units"},
+                    },
+                    "required": ["city"],
+                },
+            }
+        ]
+
+        result = template.build_prompt(
+            user_input="Test",
+            xml_formatting=True,
+            tool_schemas=tool_schemas,
+        )
+
+        # Should contain tool but in compact format
+        assert "weather" in result
+        assert "Get weather info" in result
+
+        # Should include compact parameter format
+        assert "city*:string" in result  # Required parameter with marker
+        assert "units:string" in result  # Optional parameter
+
+        # Should not have verbose usage instructions
+        assert "TOOL USAGE GUIDELINES:" not in result
+        assert "validation_rules" not in result
+
+    def test_compact_context_ultra_minimal(self):
+        """Test lightweight template creates ultra-minimal context."""
+        template = LightweightXMLPromptTemplate(system_prompt="System")
+
+        context_messages = [
+            ContextMessage("Hello there", "alice", datetime.now(), False),
+            ContextMessage("Hi back", "brok", datetime.now(), True),
+        ]
+
+        result = template.build_prompt(
+            user_input="Test",
+            xml_formatting=True,
+            context_messages=context_messages,
+        )
+
+        # Should use ultra-short attributes
+        assert 'u="alice"' in result  # Ultra-short sender attribute
+        assert 't="u"' in result  # Ultra-short type (u=user)
+        assert 't="b"' in result  # Ultra-short type (b=bot)
+
+        # Should not have verbose attributes like "timestamp" or "type"
+        assert "timestamp=" not in result
+        assert "type=" not in result
+
+    def test_measure_token_efficiency_basic(self):
+        """Test token efficiency measurement functionality."""
+        template = LightweightXMLPromptTemplate(system_prompt="Be helpful.")
+
+        analysis = template.measure_token_efficiency(
+            user_input="What's the weather?",
+        )
+
+        # Should return comprehensive analysis
+        assert "xml_tokens" in analysis
+        assert "text_tokens" in analysis
+        assert "token_overhead_percent" in analysis
+        assert "xml_is_efficient" in analysis
+        assert "recommended_for_2b" in analysis
+
+        # Values should be reasonable
+        assert analysis["xml_tokens"] > 0
+        assert analysis["text_tokens"] > 0
+        assert isinstance(analysis["recommended_for_2b"], bool)
+
+    def test_measure_token_efficiency_with_context(self):
+        """Test token efficiency with context messages."""
+        template = LightweightXMLPromptTemplate(system_prompt="Be helpful.")
+
+        context_messages = [
+            ContextMessage("Previous message", "user1", datetime.now(), False),
+        ]
+
+        analysis = template.measure_token_efficiency(
+            user_input="Follow up question",
+            context_messages=context_messages,
+        )
+
+        # Should account for context in efficiency calculation
+        assert analysis["xml_tokens"] > analysis["text_tokens"]
+        assert "generation_time_ms" in analysis
+
+    def test_backward_compatibility_when_xml_disabled(self):
+        """Test lightweight template maintains compatibility when XML disabled."""
+        template = LightweightXMLPromptTemplate(system_prompt="System prompt")
+
+        result = template.build_prompt(
+            user_input="Hello",
+            xml_formatting=False,  # Disabled
+        )
+
+        # Should be identical to regular template when XML disabled
+        regular_template = PromptTemplate(system_prompt="System prompt")
+        expected = regular_template.build_prompt("Hello")
+
+        assert result == expected
+
+    def test_context_messages_to_text_conversion(self):
+        """Test conversion of context messages to text format."""
+        template = LightweightXMLPromptTemplate(system_prompt="System")
+
+        messages = [
+            ContextMessage("User message", "alice", datetime.now(), False),
+            ContextMessage("Bot response", "brok", datetime.now(), True),
+        ]
+
+        result = template._context_messages_to_text(messages)
+
+        assert "alice: User message" in result
+        assert "🤖 brok: Bot response" in result
+
+    def test_tool_schemas_to_text_conversion(self):
+        """Test conversion of tool schemas to text format."""
+        template = LightweightXMLPromptTemplate(system_prompt="System")
+
+        schemas = [
+            {"name": "weather", "description": "Get weather info"},
+            {"name": "calculator", "description": "Do math"},
+        ]
+
+        result = template._tool_schemas_to_text(schemas)
+
+        assert "weather: Get weather info" in result
+        assert "calculator: Do math" in result
+
+
+class TestLightweightXMLHelperFunctions:
+    """Test cases for lightweight XML helper functions (KEP-002 Increment D)."""
+
+    def test_get_lightweight_xml_template_concise(self):
+        """Test getting lightweight XML template with concise style."""
+        template = get_lightweight_xml_template("concise")
+
+        assert isinstance(template, LightweightXMLPromptTemplate)
+        assert template.system_prompt == DEFAULT_CONCISE_PROMPT
+
+    def test_get_lightweight_xml_template_detailed(self):
+        """Test getting lightweight XML template with detailed style."""
+        template = get_lightweight_xml_template("detailed")
+
+        assert isinstance(template, LightweightXMLPromptTemplate)
+        assert template.system_prompt == DEFAULT_DETAILED_PROMPT
+
+    def test_get_optimal_xml_template_small_model(self):
+        """Test optimal template selection for small models."""
+        # Test with 2B model
+        template = get_optimal_xml_template("concise", "llama3.2:3b")
+
+        assert isinstance(template, LightweightXMLPromptTemplate)
+
+    def test_get_optimal_xml_template_large_model(self):
+        """Test optimal template selection for large models."""
+        # Test with larger model
+        template = get_optimal_xml_template("concise", "llama3:70b")
+
+        assert isinstance(template, XMLPromptTemplate)
+        assert not isinstance(template, LightweightXMLPromptTemplate)
+
+    def test_get_optimal_xml_template_force_lightweight(self):
+        """Test forcing lightweight template regardless of model."""
+        template = get_optimal_xml_template(
+            "concise",
+            "gpt-4",  # Large model
+            force_lightweight=True,
+        )
+
+        assert isinstance(template, LightweightXMLPromptTemplate)
+
+    def test_get_optimal_xml_template_small_model_detection(self):
+        """Test automatic detection of various small model patterns."""
+        small_models = [
+            "tinyllama",
+            "gemma-2b",
+            "phi-2",
+            "stablelm-2b",
+            "qwen1.5-1.8b",
+            "custom-model-2b",
+        ]
+
+        for model_name in small_models:
+            template = get_optimal_xml_template("concise", model_name)
+            assert isinstance(template, LightweightXMLPromptTemplate), (
+                f"Failed to detect {model_name} as small model"
+            )
+
+
+class TestLightweightXMLPerformance:
+    """Performance tests for lightweight XML templates (KEP-002 Increment D)."""
+
+    def test_token_overhead_meets_target(self):
+        """Test that lightweight XML meets the 20% overhead target."""
+        template = LightweightXMLPromptTemplate(system_prompt="Be helpful.")
+
+        # Test with realistic scenario
+        context_messages = [
+            ContextMessage("How's the weather?", "user1", datetime.now(), False),
+            ContextMessage("I'll check for you.", "brok", datetime.now(), True),
+        ]
+
+        tool_schemas = [
+            {
+                "name": "weather",
+                "description": "Get current weather",
+                "parameters": {
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            }
+        ]
+
+        analysis = template.measure_token_efficiency(
+            user_input="What about tomorrow?",
+            context_messages=context_messages,
+            tool_schemas=tool_schemas,
+        )
+
+        # Should meet KEP-002 target
+        assert analysis["meets_target"] is True, (
+            f"Token overhead {analysis['token_overhead_percent']:.1f}% exceeds 20% target"
+        )
+
+    def test_generation_performance_target(self):
+        """Test that XML generation meets <5ms performance target."""
+        template = LightweightXMLPromptTemplate(system_prompt="Test system")
+
+        # Generate reasonably complex prompt
+        context_messages = [
+            ContextMessage(f"Message {i}", f"user{i}", datetime.now(), False)
+            for i in range(10)
+        ]
+
+        analysis = template.measure_token_efficiency(
+            user_input="Complex question with context",
+            context_messages=context_messages,
+        )
+
+        # Should meet KEP-002 performance target
+        assert analysis["generation_time_ms"] < 5.0, (
+            f"Generation time {analysis['generation_time_ms']:.1f}ms exceeds 5ms target"
+        )
+
+    def test_2b_model_recommendation_logic(self):
+        """Test recommendation logic for 2B models."""
+        template = LightweightXMLPromptTemplate(system_prompt="Short prompt")
+
+        # Simple case that should be recommended for 2B models
+        analysis = template.measure_token_efficiency(
+            user_input="Simple question",
+        )
+
+        # Should be recommended for 2B models if efficient
+        if analysis["xml_is_efficient"] and analysis["meets_target"]:
+            assert analysis["recommended_for_2b"] is True
+
+    def test_token_efficiency_comparison(self):
+        """Test that lightweight XML is more efficient than regular XML."""
+        lightweight_template = LightweightXMLPromptTemplate(system_prompt="Be helpful.")
+        regular_template = XMLPromptTemplate(system_prompt="Be helpful.")
+
+        # Create same prompt with both templates
+        user_input = "What's the weather in London?"
+        context_messages = [
+            ContextMessage("Previous context", "user1", datetime.now(), False),
+        ]
+
+        lightweight_prompt = lightweight_template.build_prompt(
+            user_input=user_input,
+            xml_formatting=True,
+            context_messages=context_messages,
+        )
+
+        regular_prompt = regular_template.build_prompt(
+            user_input=user_input,
+            xml_formatting=True,
+            context_messages=context_messages,
+        )
+
+        # Lightweight should be more compact
+        assert len(lightweight_prompt) <= len(regular_prompt), (
+            "Lightweight XML should be more compact than regular XML"
+        )

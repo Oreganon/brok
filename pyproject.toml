@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "wsggpy @ git+https://github.com/MemeLabs/wsggpy.git",
     "aiohttp>=3.9.0",
+    "tiktoken>=0.6.0",  # For accurate token counting (KEP-002 Increment D)
 ]
 
 [project.scripts]
