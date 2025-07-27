@@ -78,6 +78,7 @@ class DateTimeTool(BaseTool):
 
     def __init__(self) -> None:
         """Initialize the datetime tool."""
+        super().__init__()
         logger.debug("DateTimeTool initialized")
 
     def _normalize_timezone(self, timezone_name: str) -> str:

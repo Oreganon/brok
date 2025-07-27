@@ -81,6 +81,10 @@ class CalculatorTool(BaseTool):
         "tau": math.tau,
     }
 
+    def __init__(self) -> None:
+        """Initialize the calculator tool."""
+        super().__init__()
+
     async def execute(self, **kwargs: Any) -> ToolExecutionResult:
         """Execute the calculator tool to evaluate an expression.
 

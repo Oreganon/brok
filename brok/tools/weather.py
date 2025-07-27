@@ -41,9 +41,14 @@ class WeatherTool(BaseTool):
         """Initialize the weather tool.
 
         Uses wttr.in service which requires no API key.
+        Weather data is cached for 10 minutes to reduce API calls.
         """
+        # Cache weather results for 10 minutes (600 seconds)
+        super().__init__(cache_ttl_seconds=600)
         self.base_url = "https://wttr.in"
-        logger.debug("WeatherTool initialized using wttr.in service")
+        logger.debug(
+            "WeatherTool initialized using wttr.in service with 10-minute caching"
+        )
 
     async def execute(self, **kwargs: Any) -> ToolExecutionResult:
         """Execute the weather tool to get current weather.
