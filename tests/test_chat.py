@@ -47,6 +47,10 @@ class TestChatClient:
         with pytest.MonkeyPatch().context() as m:
             mock_session = AsyncMock()
             mock_session.open = AsyncMock()
+            # Add sync methods that return proper values
+            mock_session.get_connection_info = MagicMock(
+                return_value={"connected": True, "reconnecting": False}
+            )
 
             # Mock AsyncSession constructor
             mock_session_class = MagicMock(return_value=mock_session)
@@ -66,6 +70,10 @@ class TestChatClient:
         with pytest.MonkeyPatch().context() as m:
             mock_session = AsyncMock()
             mock_session.open = AsyncMock()
+            # Add sync methods that return proper values
+            mock_session.get_connection_info = MagicMock(
+                return_value={"connected": True, "reconnecting": False}
+            )
 
             mock_session_class = MagicMock(return_value=mock_session)
             m.setattr("brok.chat.AsyncSession", mock_session_class)

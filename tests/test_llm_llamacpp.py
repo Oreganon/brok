@@ -295,15 +295,19 @@ class TestLlamaCppProvider:
     ):
         """Test health check with connection error."""
         # Arrange
-        mock_session = AsyncMock(spec=aiohttp.ClientSession)
-        mock_session.closed = False  # Make it appear as not closed
-        mock_session.get.side_effect = aiohttp.ClientError("Connection failed")
-        mock_session.post.side_effect = aiohttp.ClientError("Connection failed")
-        llamacpp_provider._session = mock_session
+        with patch("brok.llm.llamacpp.aiohttp.ClientSession") as mock_session_class:
+            mock_session = AsyncMock()
+            mock_session.closed = False
+            mock_session.get.side_effect = aiohttp.ClientError("Connection failed")
+            mock_session.post.side_effect = aiohttp.ClientError("Connection failed")
+            mock_session.close = AsyncMock()
+            mock_session_class.return_value = mock_session
 
-        # Act & Assert
-        with pytest.raises(LLMConnectionError, match="LlamaCpp health check failed"):
-            await llamacpp_provider.health_check()
+            # Act & Assert
+            with pytest.raises(
+                LLMConnectionError, match="LlamaCpp health check failed"
+            ):
+                await llamacpp_provider.health_check()
 
     def test_build_prompt_without_context(self, llamacpp_provider: LlamaCppProvider):
         """Test prompt building without context."""
@@ -313,7 +317,8 @@ class TestLlamaCppProvider:
         # Assert
         assert "User: Hello" in prompt
         assert "Assistant:" in prompt
-        assert "You are brok" in prompt  # Verify system prompt is included
+        assert "helpful AI assistant" in prompt  # Verify system prompt is included
+        assert "chat room" in prompt  # Verify context is included
 
     def test_build_prompt_with_context(self, llamacpp_provider: LlamaCppProvider):
         """Test prompt building with context."""

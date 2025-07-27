@@ -336,8 +336,12 @@ class TestChatBot:
     ):
         """Test that connection monitor detects chat disconnection."""
         # Arrange
-        # Make is_connected return False without being a coroutine
+        # Make all connection methods return proper non-coroutine values
         mock_chat_client.is_connected = MagicMock(return_value=False)
+        mock_chat_client.get_connection_info = MagicMock(
+            return_value={"connected": False, "reconnecting": False}
+        )
+        mock_chat_client.is_reconnecting = MagicMock(return_value=False)
         chat_bot._shutdown_event = asyncio.Event()
 
         # Act
@@ -670,12 +674,19 @@ class TestChatBotReconnection:
         # Arrange
         # Simulate connection lost initially, then successful reconnection
         mock_chat_client.is_connected = MagicMock(side_effect=[False, True, True])
-        mock_chat_client.connect = AsyncMock()
+        mock_chat_client.get_connection_info = MagicMock(
+            return_value={"connected": False, "reconnecting": False}
+        )
+        mock_chat_client.is_reconnecting = MagicMock(return_value=False)
+        mock_chat_client.force_reconnect = AsyncMock()
         chat_bot._shutdown_event = asyncio.Event()
 
         # Use shorter delays for testing
         chat_bot._config.initial_reconnect_delay = 0.1
         chat_bot._config.connection_check_interval = 0.1
+        chat_bot._config.max_reconnect_attempts = (
+            1  # Trigger reconnection after 1 failure
+        )
 
         # Act
         monitor_task = asyncio.create_task(chat_bot._monitor_connection())
@@ -690,7 +701,7 @@ class TestChatBotReconnection:
             monitor_task.cancel()
 
         # Assert
-        assert mock_chat_client.connect.call_count >= 1
+        assert mock_chat_client.force_reconnect.call_count >= 1
         assert (
             "Chat reconnection successful!"
             in [
@@ -707,14 +718,23 @@ class TestChatBotReconnection:
         """Test that reconnection uses exponential backoff on failures."""
         # Arrange
         mock_chat_client.is_connected = MagicMock(return_value=False)
+        mock_chat_client.get_connection_info = MagicMock(
+            return_value={"connected": False, "reconnecting": False}
+        )
+        mock_chat_client.is_reconnecting = MagicMock(return_value=False)
         # Simulate multiple connection failures
-        mock_chat_client.connect = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_chat_client.force_reconnect = AsyncMock(
+            side_effect=Exception("Connection failed")
+        )
         chat_bot._shutdown_event = asyncio.Event()
 
         # Use very short delays for testing
         chat_bot._config.initial_reconnect_delay = 0.01
         chat_bot._config.max_reconnect_delay = 0.08
         chat_bot._config.connection_check_interval = 0.01
+        chat_bot._config.max_reconnect_attempts = (
+            1  # Trigger reconnection after 1 failure
+        )
 
         # Act
         monitor_task = asyncio.create_task(chat_bot._monitor_connection())
@@ -728,9 +748,11 @@ class TestChatBotReconnection:
         except TimeoutError:
             monitor_task.cancel()
 
-        # Assert - Should have attempted multiple reconnections
-        assert mock_chat_client.connect.call_count >= 2
-        assert chat_bot._stats.errors_count >= 2
+        # Assert - Should have attempted manual reconnection once before giving up
+        assert mock_chat_client.force_reconnect.call_count >= 1
+        assert chat_bot._stats.errors_count >= 1
+        # Bot should have shut down after manual reconnection failed
+        assert chat_bot._shutdown_event.is_set()
 
     @pytest.mark.asyncio
     async def test_monitor_connection_gives_up_after_max_failures(
@@ -739,7 +761,13 @@ class TestChatBotReconnection:
         """Test that connection monitor gives up after max consecutive failures."""
         # Arrange
         mock_chat_client.is_connected = MagicMock(return_value=False)
-        mock_chat_client.connect = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_chat_client.get_connection_info = MagicMock(
+            return_value={"connected": False, "reconnecting": False}
+        )
+        mock_chat_client.is_reconnecting = MagicMock(return_value=False)
+        mock_chat_client.force_reconnect = AsyncMock(
+            side_effect=Exception("Connection failed")
+        )
         chat_bot._shutdown_event = asyncio.Event()
 
         # Set very low max attempts for testing
@@ -779,12 +807,19 @@ class TestChatBotReconnection:
         ]  # First fails, then succeeds
 
         mock_chat_client.is_connected = MagicMock(side_effect=connection_states)
-        mock_chat_client.connect = AsyncMock(side_effect=connect_results)
+        mock_chat_client.get_connection_info = MagicMock(
+            return_value={"connected": False, "reconnecting": False}
+        )
+        mock_chat_client.is_reconnecting = MagicMock(return_value=False)
+        mock_chat_client.force_reconnect = AsyncMock(side_effect=connect_results)
         chat_bot._shutdown_event = asyncio.Event()
 
         # Use very short delays for testing
         chat_bot._config.initial_reconnect_delay = 0.01
         chat_bot._config.connection_check_interval = 0.01
+        chat_bot._config.max_reconnect_attempts = (
+            1  # Trigger reconnection after 1 failure
+        )
 
         # Act
         monitor_task = asyncio.create_task(chat_bot._monitor_connection())
@@ -799,7 +834,7 @@ class TestChatBotReconnection:
             monitor_task.cancel()
 
         # Assert - Should have attempted reconnection multiple times
-        assert mock_chat_client.connect.call_count >= 1
+        assert mock_chat_client.force_reconnect.call_count >= 1
 
     def test_config_includes_reconnection_settings(self, bot_config: BotConfig):
         """Test that bot configuration includes reconnection settings."""

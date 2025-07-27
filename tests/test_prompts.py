@@ -154,8 +154,8 @@ class TestDefaultTemplates:
         assert "complexity" in DEFAULT_ADAPTIVE_PROMPT.lower()
         assert "brief" in DEFAULT_ADAPTIVE_PROMPT.lower()
 
-    def test_all_prompts_mention_brok(self):
-        """Test that all default prompts identify the bot as 'brok'."""
+    def test_all_prompts_avoid_self_reference(self):
+        """Test that all default prompts avoid mentioning the bot's own name."""
         prompts = [
             DEFAULT_CONCISE_PROMPT,
             DEFAULT_DETAILED_PROMPT,
@@ -163,8 +163,12 @@ class TestDefaultTemplates:
         ]
 
         for prompt in prompts:
-            assert "brok" in prompt.lower()
+            # Prompts should not mention "brok" as per the design change
+            assert "brok" not in prompt.lower()
+            # But should still be chat room context
             assert "chat room" in prompt.lower()
+            # And should include the instruction to not mention own name
+            assert "never mention your own name" in prompt.lower()
 
 
 class TestPromptTemplateFactory:

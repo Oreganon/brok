@@ -271,7 +271,8 @@ class TestOllamaProvider:
         # Assert
         assert "User: Hello" in prompt
         assert "Assistant:" in prompt
-        assert "You are brok" in prompt  # Verify system prompt is included
+        assert "helpful AI assistant" in prompt  # Verify system prompt is included
+        assert "chat room" in prompt  # Verify context is included
 
     def test_build_prompt_with_context(self, ollama_provider: OllamaProvider):
         """Test prompt building with context."""

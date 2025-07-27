@@ -30,7 +30,7 @@ class CalculatorTool(BaseTool):
     description: ClassVar[str] = (
         "Perform mathematical calculations and evaluate expressions"
     )
-    parameters: ClassVar[dict] = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "expression": {
@@ -42,7 +42,7 @@ class CalculatorTool(BaseTool):
     }
 
     # Allowed operators and functions for safe evaluation
-    OPERATORS: ClassVar[dict] = {
+    OPERATORS: ClassVar[dict[type, Any]] = {
         ast.Add: operator.add,
         ast.Sub: operator.sub,
         ast.Mult: operator.mul,
@@ -54,7 +54,7 @@ class CalculatorTool(BaseTool):
         ast.UAdd: operator.pos,
     }
 
-    FUNCTIONS: ClassVar[dict] = {
+    FUNCTIONS: ClassVar[dict[str, Any]] = {
         "abs": abs,
         "round": round,
         "min": min,
@@ -75,7 +75,7 @@ class CalculatorTool(BaseTool):
         "factorial": math.factorial,
     }
 
-    CONSTANTS: ClassVar[dict] = {
+    CONSTANTS: ClassVar[dict[str, Any]] = {
         "pi": math.pi,
         "e": math.e,
         "tau": math.tau,

@@ -26,7 +26,7 @@ class WeatherTool(BaseTool):
 
     name: ClassVar[str] = "weather"
     description: ClassVar[str] = "Get current weather information for a city"
-    parameters: ClassVar[dict] = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "city": {

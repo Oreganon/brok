@@ -59,7 +59,7 @@ class DateTimeTool(BaseTool):
 
     name: ClassVar[str] = "datetime"
     description: ClassVar[str] = "Get current date and time information"
-    parameters: ClassVar[dict] = {
+    parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "format": {

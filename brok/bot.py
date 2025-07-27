@@ -464,7 +464,7 @@ class ChatBot:
                 await asyncio.sleep(5)  # Brief pause before retrying
 
     def _log_connection_stats(
-        self, conn_info: dict, is_connected: bool, is_reconnecting: bool
+        self, conn_info: dict[str, Any], is_connected: bool, is_reconnecting: bool
     ) -> None:
         """Log detailed connection statistics.
 
