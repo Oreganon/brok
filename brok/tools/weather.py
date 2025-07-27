@@ -91,8 +91,8 @@ class WeatherTool(BaseTool):
 
     async def _fetch_weather(self, city: str) -> ToolExecutionResult:
         """Fetch weather data from wttr.in service."""
-        # Use format=3 for a concise one-line format
-        url = f"{self.base_url}/{city}?format=3"
+        # Use format=2 for a concise one-line format
+        url = f"{self.base_url}/{city}?format=2"
 
         try:
             async with (
