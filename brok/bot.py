@@ -374,75 +374,86 @@ class ChatBot:
             await self._shutdown()
 
     async def _monitor_connection(self) -> None:
-        """Monitor chat connection and handle reconnection if needed.
+        """Monitor chat connection and provide additional oversight.
 
-        Runs continuously to ensure chat connection remains active.
-        Implements exponential backoff for reconnection attempts to avoid
-        overwhelming the chat server during outages.
+        Now that wsggpy handles automatic reconnection, this monitor provides:
+        1. Enhanced logging and statistics tracking
+        2. Detection of stale connections (no messages for extended periods)
+        3. Manual intervention when wsggpy reconnection fails
+        4. Connection health reporting
 
         The monitor will:
         1. Check connection status every 10 seconds
-        2. Attempt reconnection with exponential backoff if disconnected
-        3. Log all connection events for debugging
-        4. Update error statistics for monitoring
+        2. Detect and log wsggpy reconnection events
+        3. Force reconnection for stale connections
+        4. Provide fallback reconnection if wsggpy fails
         """
-        reconnect_delay = self._config.initial_reconnect_delay
-        max_reconnect_delay = self._config.max_reconnect_delay
+        message_timeout = 300  # 5 minutes without messages
+        last_connection_check = time.time()
         consecutive_failures = 0
         max_consecutive_failures = self._config.max_reconnect_attempts
 
         while not self._shutdown_event.is_set():
             try:
-                if not self._chat_client.is_connected():
-                    logger.warning(
-                        f"Chat connection lost! Consecutive failures: {consecutive_failures}"
-                    )
-                    self._stats.errors_count += 1
+                current_time = time.time()
 
-                    # Check if we should give up
+                # Get detailed connection info from wsggpy
+                conn_info = self._chat_client.get_connection_info()
+                is_connected = self._chat_client.is_connected()
+                is_reconnecting = self._chat_client.is_reconnecting()
+
+                # Enhanced connection status logging
+                if is_reconnecting:
+                    logger.info("🔄 wsggpy is handling reconnection...")
+                elif not is_connected:
+                    logger.warning("🔌 Chat connection is down")
+                    self._stats.errors_count += 1
+                    consecutive_failures += 1
+
+                    # If wsggpy has exhausted its attempts, try manual reconnection
                     if consecutive_failures >= max_consecutive_failures:
                         logger.error(
-                            f"Chat reconnection failed {max_consecutive_failures} times. "
-                            "Giving up on automatic reconnection."
+                            f"Chat connection failed {max_consecutive_failures} times. "
+                            "Attempting manual intervention..."
                         )
-                        self._shutdown_event.set()
-                        break
-
-                    # Attempt reconnection with exponential backoff
-                    logger.info(
-                        f"Attempting to reconnect to chat in {reconnect_delay:.1f} seconds..."
-                    )
-                    await asyncio.sleep(reconnect_delay)
-
-                    if self._shutdown_event.is_set():
-                        break
-
-                    try:
-                        logger.info("Attempting chat reconnection...")
-                        await self._chat_client.connect(
-                            jwt_token=self._config.jwt_token,
-                            environment=self._config.chat_environment,
-                        )
-
-                        logger.info("✅ Chat reconnection successful!")
-                        # Reset backoff on successful connection
-                        reconnect_delay = self._config.initial_reconnect_delay
-                        consecutive_failures = 0
-                        self._stats.chat_reconnections += 1
-
-                    except Exception:
-                        consecutive_failures += 1
-                        logger.exception("Chat reconnection failed")
-                        self._stats.errors_count += 1
-
-                        # Increase delay with exponential backoff
-                        reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
-
+                        try:
+                            await self._chat_client.force_reconnect()
+                            consecutive_failures = 0  # Reset on manual attempt
+                        except Exception:
+                            logger.exception("Manual reconnection failed")
+                            # Give up after manual intervention fails
+                            logger.exception(
+                                "Manual reconnection failed. Shutting down."
+                            )
+                            self._shutdown_event.set()
+                            break
                 # Connection is healthy - reset failure counter
                 elif consecutive_failures > 0:
-                    logger.debug("Chat connection healthy - resetting failure counter")
+                    logger.info("✅ Chat connection restored!")
                     consecutive_failures = 0
-                    reconnect_delay = self._config.initial_reconnect_delay
+
+                # Detect stale connections (no messages for extended periods)
+                time_since_last_activity = current_time - self._stats.last_activity
+                if (
+                    self._stats.last_activity
+                    > 0  # We've processed at least one message
+                    and time_since_last_activity > message_timeout
+                    and is_connected
+                    and not is_reconnecting
+                ):
+                    logger.warning(
+                        f"No chat activity for {time_since_last_activity:.0f}s. "
+                        "Connection may be stale, forcing reconnection..."
+                    )
+                    try:
+                        await self._chat_client.force_reconnect()
+                    except Exception as e:
+                        logger.warning(f"Failed to force reconnection: {e}")
+
+                # Log detailed connection stats periodically
+                if current_time - last_connection_check > 60:  # Every minute
+                    self._log_connection_stats(conn_info, is_connected, is_reconnecting)
+                    last_connection_check = current_time
 
                 # Check again based on configured interval
                 await asyncio.sleep(self._config.connection_check_interval)
@@ -451,6 +462,35 @@ class ChatBot:
                 logger.exception("Connection monitor error")
                 self._stats.errors_count += 1
                 await asyncio.sleep(5)  # Brief pause before retrying
+
+    def _log_connection_stats(
+        self, conn_info: dict, is_connected: bool, is_reconnecting: bool
+    ) -> None:
+        """Log detailed connection statistics.
+
+        Args:
+            conn_info: Connection information from wsggpy
+            is_connected: Whether chat is connected
+            is_reconnecting: Whether reconnection is in progress
+        """
+        status_emoji = "✅" if is_connected else "🔄" if is_reconnecting else "❌"
+        connection_attempts = conn_info.get("connection_attempts", 0)
+        last_error = conn_info.get("last_error")
+
+        logger.info(
+            f"{status_emoji} Connection Status - "
+            f"Connected: {is_connected}, "
+            f"Reconnecting: {is_reconnecting}, "
+            f"Attempts: {connection_attempts}"
+        )
+
+        if last_error:
+            logger.debug(f"Last connection error: {last_error}")
+
+        # Update bot stats with wsggpy reconnection info
+        self._stats.chat_reconnections = max(
+            self._stats.chat_reconnections, connection_attempts
+        )
 
     async def _llm_worker(self, worker_id: int) -> None:
         """Worker to process LLM requests from queue.

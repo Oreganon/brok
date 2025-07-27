@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from wsggpy import AsyncSession, ChatEnvironment, Message, RoomAction
 
@@ -196,18 +196,34 @@ class ContextMessage:
 
 
 class ChatClient:
-    """Strims chat client wrapper with message processing.
+    """Strims chat client wrapper with message processing and wsggpy auto-reconnection.
 
     Handles connection to strims.gg chat, message filtering, context management,
-    and response sending. Integrates with wsggpy for WebSocket communication.
+    and response sending. Integrates with wsggpy for WebSocket communication and
+    now leverages wsggpy's built-in auto-reconnection capabilities.
+
+    New in this version:
+    - Integrated wsggpy auto-reconnection with configurable attempts and delays
+    - Event handlers for disconnect/reconnect events
+    - Enhanced connection status monitoring
+    - Manual reconnection control
+    - Detailed connection statistics
+
+    The reconnection strategy now works on two levels:
+    1. wsggpy handles immediate WebSocket-level reconnections automatically
+    2. ChatBot._monitor_connection() provides oversight, stale connection detection,
+       and manual intervention when wsggpy reconnection fails
 
     Example:
         >>> client = ChatClient(
         ...     response_filters=[lambda msg, sender: msg.startswith("!bot")],
-        ...     context_window_size=10
+        ...     context_window_size=10,
+        ...     wsggpy_auto_reconnect=True,
+        ...     wsggpy_reconnect_attempts=5,
+        ...     wsggpy_reconnect_delay=2.0
         ... )
         >>> await client.connect(jwt_token=None, environment="production")
-        >>> # Client will now process incoming messages
+        >>> # Client will now automatically handle reconnections via wsggpy
     """
 
     def __init__(
@@ -222,8 +238,13 @@ class ChatClient:
         max_context_tokens: int = 500,
         prioritize_mentions: bool = True,
         include_bot_responses: bool = True,
+        # New wsggpy reconnection settings
+        wsggpy_auto_reconnect: bool = True,
+        wsggpy_reconnect_attempts: int = 5,
+        wsggpy_reconnect_delay: float = 2.0,
+        wsggpy_reconnect_backoff: bool = True,
     ):
-        """Initialize chat client with enhanced context capabilities.
+        """Initialize chat client with enhanced context capabilities and wsggpy auto-reconnection.
 
         Args:
             response_filters: List of functions to determine if bot should respond
@@ -236,6 +257,10 @@ class ChatClient:
             max_context_tokens: Maximum tokens to include in context
             prioritize_mentions: Whether to prioritize mentions in context
             include_bot_responses: Whether to include bot responses in context
+            wsggpy_auto_reconnect: Enable wsggpy's built-in auto-reconnection
+            wsggpy_reconnect_attempts: Number of reconnection attempts for wsggpy
+            wsggpy_reconnect_delay: Initial delay between wsggpy reconnection attempts
+            wsggpy_reconnect_backoff: Whether to use exponential backoff in wsggpy
         """
         self._filters = response_filters
         self._context_window_size = context_window_size
@@ -248,6 +273,12 @@ class ChatClient:
         self._max_context_tokens = max_context_tokens
         self._prioritize_mentions = prioritize_mentions
         self._include_bot_responses = include_bot_responses
+
+        # wsggpy reconnection settings
+        self._wsggpy_auto_reconnect = wsggpy_auto_reconnect
+        self._wsggpy_reconnect_attempts = wsggpy_reconnect_attempts
+        self._wsggpy_reconnect_delay = wsggpy_reconnect_delay
+        self._wsggpy_reconnect_backoff = wsggpy_reconnect_backoff
 
         # Initialize ignore_users list and automatically add bot name (all lowercase for case-insensitive matching)
         self._ignore_users = {user.lower() for user in (ignore_users or [])}
@@ -293,6 +324,25 @@ class ChatClient:
                 url=chat_env,
             )
 
+            # Configure wsggpy auto-reconnection
+            if self._wsggpy_auto_reconnect:
+                self._session.set_auto_reconnect(True)
+                self._session.set_reconnect_config(
+                    attempts=self._wsggpy_reconnect_attempts,
+                    delay=self._wsggpy_reconnect_delay,
+                )
+
+                # Add reconnection event handlers
+                self._session.add_disconnect_handler(self._on_disconnect)
+                self._session.add_reconnecting_handler(self._on_reconnecting)
+                self._session.add_reconnected_handler(self._on_reconnected)
+                self._session.add_reconnect_failed_handler(self._on_reconnect_failed)
+
+                logger.info(
+                    f"Configured wsggpy auto-reconnection: {self._wsggpy_reconnect_attempts} attempts, "
+                    f"{self._wsggpy_reconnect_delay}s initial delay"
+                )
+
             # Add message handlers
             self._session.add_message_handler(self._on_message)
             self._session.add_join_handler(self._on_join)
@@ -325,7 +375,18 @@ class ChatClient:
 
     def is_connected(self) -> bool:
         """Check if client is connected to chat."""
-        return self._is_connected and self._session is not None
+        if self._session is None:
+            return False
+
+        # Use wsggpy's connection info if available
+        if hasattr(self._session, "get_connection_info"):
+            conn_info = self._session.get_connection_info()
+            return conn_info.get("connected", False) and not conn_info.get(
+                "reconnecting", False
+            )
+
+        # Fallback to local state
+        return self._is_connected
 
     async def should_respond_to_message(
         self, message: str, sender: str
@@ -1111,6 +1172,98 @@ class ChatClient:
         """
         username = event.user.nick
         logger.debug(f"👋 {username} left the chat")
+
+    def _on_disconnect(self, _event: Any, _session: AsyncSession) -> None:
+        """Handle disconnection event from wsggpy.
+
+        Called when wsggpy detects a connection loss.
+
+        Args:
+            event: The disconnect event (unused)
+            session: The wsggpy session (unused)
+        """
+        logger.warning("🔌 Chat connection lost - wsggpy detected disconnection")
+        self._is_connected = False
+
+    def _on_reconnecting(self, _event: Any, _session: AsyncSession) -> None:
+        """Handle reconnection attempt event from wsggpy.
+
+        Called when wsggpy is attempting to reconnect.
+
+        Args:
+            event: The reconnecting event (unused)
+            session: The wsggpy session (unused)
+        """
+        logger.info("🔄 Chat reconnection attempt in progress...")
+        self._is_connected = False
+
+    def _on_reconnected(self, _event: Any, _session: AsyncSession) -> None:
+        """Handle successful reconnection event from wsggpy.
+
+        Called when wsggpy successfully reconnects.
+
+        Args:
+            event: The reconnected event (unused)
+            session: The wsggpy session (unused)
+        """
+        logger.info("✅ Chat reconnection successful!")
+        self._is_connected = True
+
+    def _on_reconnect_failed(self, _event: Any, _session: AsyncSession) -> None:
+        """Handle failed reconnection event from wsggpy.
+
+        Called when wsggpy exhausts all reconnection attempts.
+
+        Args:
+            event: The reconnect failed event (unused)
+            session: The wsggpy session (unused)
+        """
+        logger.error("❌ Chat reconnection failed - all attempts exhausted")
+        self._is_connected = False
+
+    def is_reconnecting(self) -> bool:
+        """Check if wsggpy is currently attempting to reconnect.
+
+        Returns:
+            bool: True if reconnection is in progress
+        """
+        if self._session and hasattr(self._session, "is_reconnecting"):
+            return bool(self._session.is_reconnecting())
+        return False
+
+    def get_connection_info(self) -> dict[str, Any]:
+        """Get detailed connection information from wsggpy.
+
+        Returns:
+            dict: Connection status and statistics
+        """
+        if self._session and hasattr(self._session, "get_connection_info"):
+            info = self._session.get_connection_info()
+            return dict(info) if info else {}
+        return {
+            "connected": self._is_connected,
+            "reconnecting": False,
+            "connection_attempts": 0,
+            "last_error": None,
+        }
+
+    async def force_reconnect(self) -> None:
+        """Manually trigger a reconnection attempt.
+
+        Raises:
+            ChatConnectionError: When session is not available
+        """
+        if not self._session:
+            raise ChatConnectionError("No session available for reconnection")
+
+        if hasattr(self._session, "force_reconnect"):
+            logger.info("🔄 Forcing chat reconnection...")
+            await self._session.force_reconnect()
+        else:
+            # Fallback: disconnect and reconnect manually
+            logger.info("🔄 Forcing reconnection via disconnect/connect...")
+            await self.disconnect()
+            # Note: The caller should handle reconnection in this case
 
 
 def create_default_filters(keywords: list[str]) -> list[Callable[[str, str], bool]]:

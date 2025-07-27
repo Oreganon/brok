@@ -61,6 +61,16 @@ class BotConfig:
         10  # How often to check connection status (seconds)
     )
 
+    # wsggpy auto-reconnection settings (NEW)
+    wsggpy_auto_reconnect: bool = True  # Enable wsggpy's built-in auto-reconnection
+    wsggpy_reconnect_attempts: int = 5  # Number of reconnection attempts for wsggpy
+    wsggpy_reconnect_delay: float = (
+        2.0  # Initial delay between wsggpy reconnection attempts
+    )
+    wsggpy_reconnect_backoff: bool = (
+        True  # Whether to use exponential backoff in wsggpy
+    )
+
     # Tools configuration
     enable_tools: bool = True  # Whether to enable tool calling
 
@@ -105,6 +115,20 @@ class BotConfig:
             )
             connection_check_interval = cls._parse_positive_int(
                 "CONNECTION_CHECK_INTERVAL", "10"
+            )
+
+            # Parse wsggpy auto-reconnection settings
+            wsggpy_auto_reconnect = (
+                os.getenv("WSGGPY_AUTO_RECONNECT", "true").lower() == "true"
+            )
+            wsggpy_reconnect_attempts = cls._parse_positive_int(
+                "WSGGPY_RECONNECT_ATTEMPTS", "5"
+            )
+            wsggpy_reconnect_delay = cls._parse_float_range(
+                "WSGGPY_RECONNECT_DELAY", "2.0", 0.1, 60.0
+            )
+            wsggpy_reconnect_backoff = (
+                os.getenv("WSGGPY_RECONNECT_BACKOFF", "true").lower() == "true"
             )
 
             # Validate environment
@@ -219,6 +243,10 @@ class BotConfig:
                 initial_reconnect_delay=initial_reconnect_delay,
                 max_reconnect_delay=max_reconnect_delay,
                 connection_check_interval=connection_check_interval,
+                wsggpy_auto_reconnect=wsggpy_auto_reconnect,
+                wsggpy_reconnect_attempts=wsggpy_reconnect_attempts,
+                wsggpy_reconnect_delay=wsggpy_reconnect_delay,
+                wsggpy_reconnect_backoff=wsggpy_reconnect_backoff,
                 log_level=log_level,
                 log_chat_messages=os.getenv("LOG_CHAT", "false").lower() == "true",
                 enable_tools=os.getenv("ENABLE_TOOLS", "true").lower() == "true",

@@ -146,6 +146,11 @@ async def main() -> None:
             max_context_tokens=config.max_context_tokens,
             prioritize_mentions=config.prioritize_mentions,
             include_bot_responses=config.include_bot_responses,
+            # wsggpy auto-reconnection settings
+            wsggpy_auto_reconnect=config.wsggpy_auto_reconnect,
+            wsggpy_reconnect_attempts=config.wsggpy_reconnect_attempts,
+            wsggpy_reconnect_delay=config.wsggpy_reconnect_delay,
+            wsggpy_reconnect_backoff=config.wsggpy_reconnect_backoff,
         )
 
         # Create prompt template based on configuration (KEP-002 Increment B)
