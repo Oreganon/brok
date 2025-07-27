@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 from brok.config import BotConfig
@@ -580,3 +583,45 @@ class TestXMLPromptFormattingConfig:
 
             # Assert
             assert config.log_level == level
+
+
+class TestPromptTokenLoggingConfig:
+    """Test cases for prompt token logging configuration."""
+
+    def test_log_prompt_tokens_default_false(self):
+        """Test that log_prompt_tokens defaults to False."""
+        config = BotConfig()
+
+        assert config.log_prompt_tokens is False
+
+    def test_log_prompt_tokens_from_env_false(self):
+        """Test parsing LOG_PROMPT_TOKENS=false from environment."""
+        with patch.dict(os.environ, {"LOG_PROMPT_TOKENS": "false"}):
+            config = BotConfig.from_env()
+
+            assert config.log_prompt_tokens is False
+
+    def test_log_prompt_tokens_from_env_true(self):
+        """Test parsing LOG_PROMPT_TOKENS=true from environment."""
+        with patch.dict(os.environ, {"LOG_PROMPT_TOKENS": "true"}):
+            config = BotConfig.from_env()
+
+            assert config.log_prompt_tokens is True
+
+    def test_log_prompt_tokens_case_insensitive(self):
+        """Test that LOG_PROMPT_TOKENS parsing is case-insensitive."""
+        test_cases = ["TRUE", "True", "tRuE"]
+
+        for value in test_cases:
+            with patch.dict(os.environ, {"LOG_PROMPT_TOKENS": value}):
+                config = BotConfig.from_env()
+                assert config.log_prompt_tokens is True
+
+    def test_log_prompt_tokens_invalid_values_default_false(self):
+        """Test that invalid LOG_PROMPT_TOKENS values default to False."""
+        invalid_values = ["yes", "1", "on", "invalid"]
+
+        for value in invalid_values:
+            with patch.dict(os.environ, {"LOG_PROMPT_TOKENS": value}):
+                config = BotConfig.from_env()
+                assert config.log_prompt_tokens is False

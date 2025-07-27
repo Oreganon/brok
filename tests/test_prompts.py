@@ -1,7 +1,9 @@
 """Tests for prompt management functionality."""
 
 from datetime import datetime
+import logging
 from typing import Any, ClassVar
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -1256,3 +1258,125 @@ class TestLightweightXMLPerformance:
         assert len(lightweight_prompt) <= len(regular_prompt), (
             "Lightweight XML should be more compact than regular XML"
         )
+
+
+class TestPromptTokenLogging:
+    """Test cases for prompt token logging functionality."""
+
+    def test_prompt_template_logging_disabled_by_default(self):
+        """Test that token logging is disabled by default."""
+        template = PromptTemplate(system_prompt="Test system")
+
+        with patch("brok.prompts.logger") as mock_logger:
+            result = template.build_prompt("Hello", log_tokens=False)
+
+            # Should not log when disabled
+            mock_logger.log.assert_not_called()
+            assert "Hello" in result
+
+    def test_prompt_template_logging_enabled(self):
+        """Test that token logging works when enabled."""
+        template = PromptTemplate(system_prompt="Test system")
+
+        with patch("brok.prompts.logger") as mock_logger:
+            result = template.build_prompt("Hello", log_tokens=True)
+
+            # Should log when enabled
+            mock_logger.log.assert_called()
+            mock_logger.debug.assert_called()
+            assert "Hello" in result
+
+    def test_xml_template_logging_with_overhead_calculation(self):
+        """Test XML template logging includes overhead calculation."""
+        template = XMLPromptTemplate(system_prompt="Test system")
+
+        with patch("brok.prompts.logger") as mock_logger:
+            result = template.build_prompt(
+                "Hello", xml_formatting=True, log_tokens=True
+            )
+
+            # Should log with XML overhead metrics
+            mock_logger.log.assert_called()
+
+            # Check that the log call includes XML overhead
+            log_call_args = mock_logger.log.call_args[0]
+            log_message = log_call_args[1] if len(log_call_args) > 1 else ""
+            assert "xml_overhead=" in log_message
+            assert "type=xml" in log_message
+            assert "Hello" in result
+
+    def test_lightweight_xml_template_efficiency_logging(self):
+        """Test lightweight XML template logs efficiency comparisons."""
+        template = LightweightXMLPromptTemplate(system_prompt="Test system")
+
+        with patch("brok.prompts.logger") as mock_logger:
+            result = template.build_prompt(
+                "Hello", xml_formatting=True, log_tokens=True
+            )
+
+            # Should log with efficiency comparison
+            mock_logger.log.assert_called()
+            mock_logger.info.assert_called()
+
+            # Check for efficiency comparison log
+            info_calls = [
+                call
+                for call in mock_logger.info.call_args_list
+                if "XML Efficiency Comparison" in str(call)
+            ]
+            assert len(info_calls) > 0
+
+            efficiency_log = str(info_calls[0])
+            assert "Savings vs Regular:" in efficiency_log
+            assert "2B Model Optimized:" in efficiency_log
+            assert "Hello" in result
+
+    def test_log_prompt_metrics_performance_levels(self):
+        """Test that logging uses appropriate levels based on performance."""
+        template = PromptTemplate(system_prompt="Test")
+
+        # Test with different generation times by mocking
+        with patch('brok.prompts.time.perf_counter') as mock_time, \
+             patch('brok.prompts.logger') as mock_logger:
+            # Mock slow generation (>10ms)
+            mock_time.side_effect = [0.0, 0.015]  # 15ms
+
+            template._log_prompt_metrics(
+                prompt_type="test",
+                prompt="test prompt",
+                generation_time_ms=15.0,
+                user_input="test input"
+            )
+
+            # Should use WARNING level for slow generation
+            warning_calls = [call for call in mock_logger.log.call_args_list
+                           if call[0][0] == logging.WARNING]
+            assert len(warning_calls) > 0
+
+            # Check that performance status is included
+            log_message = str(warning_calls[0])
+            assert "perf=SLOW" in log_message
+
+    def test_token_efficiency_metrics_in_logs(self):
+        """Test that token efficiency metrics are properly logged."""
+        template = LightweightXMLPromptTemplate(system_prompt="Be helpful")
+
+        with patch('brok.prompts.logger') as mock_logger:
+            template.build_prompt(
+                "What's the weather?",
+                xml_formatting=True,
+                log_tokens=True
+            )
+
+            # Should include efficiency metrics
+            mock_logger.log.assert_called()
+
+            # Check for token metrics in log
+            log_calls = mock_logger.log.call_args_list
+            log_messages = [str(call) for call in log_calls]
+
+            # Should have token count and efficiency in logs
+            metrics_log = next((msg for msg in log_messages if "tokens=" in msg), "")
+            assert "tokens=" in metrics_log
+            assert "efficiency=" in metrics_log
+            assert "type=lightweight_xml" in metrics_log

@@ -237,13 +237,19 @@ class LlamaCppProvider(LLMProvider):
                 xml_formatting=True,
                 context_messages=context_messages,
                 tool_schemas=tool_schemas,
+                log_tokens=self.config.log_prompt_tokens,  # Enable logging if configured
             )
         else:
             # Legacy format for non-XML templates
             tools_description = (
                 self.get_tools_description() if self.has_tools() else None
             )
-            return self.prompt_template.build_prompt(prompt, context, tools_description)
+            return self.prompt_template.build_prompt(
+                prompt,
+                context,
+                tools_description,
+                log_tokens=self.config.log_prompt_tokens,  # Enable logging if configured
+            )
 
     async def close(self) -> None:
         """Close the HTTP session if we own it."""

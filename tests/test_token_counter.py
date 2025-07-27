@@ -75,10 +75,12 @@ class TestTokenCounter:
     def test_count_tokens_empty_string(self):
         """Test token counting handles empty strings."""
         counter = TokenCounter()
-        
+
         result = counter.count_tokens("")
-        
-        assert result.token_count >= 0  # Empty string can have 0 tokens (tiktoken behavior)
+
+        assert (
+            result.token_count >= 0
+        )  # Empty string can have 0 tokens (tiktoken behavior)
         assert result.character_count == 0
         assert result.measurement_time_ms >= 0
 
@@ -119,9 +121,9 @@ class TestTokenCounter:
         # Use a more realistic lightweight XML example
         text_prompt = "System: Be helpful.\n\nUser: Hello\n\nAssistant:"
         xml_prompt = "<prompt><system>Be helpful.</system><request>Hello\nAssistant:</request></prompt>"
-        
+
         result = counter.measure_prompt_overhead(xml_prompt, text_prompt)
-        
+
         # The overhead will vary based on content - use a more generous bound for testing
         assert result["token_overhead_percent"] >= 0  # Should have some overhead
         assert result["token_overhead_percent"] < 200.0  # But not excessive

@@ -77,6 +77,7 @@ class BotConfig:
     # Logging
     log_level: str = "INFO"
     log_chat_messages: bool = False  # Opt-in for privacy
+    log_prompt_tokens: bool = False  # Opt-in for performance monitoring
 
     @classmethod
     def from_env(cls) -> BotConfig:
@@ -249,6 +250,8 @@ class BotConfig:
                 wsggpy_reconnect_backoff=wsggpy_reconnect_backoff,
                 log_level=log_level,
                 log_chat_messages=os.getenv("LOG_CHAT", "false").lower() == "true",
+                log_prompt_tokens=os.getenv("LOG_PROMPT_TOKENS", "false").lower()
+                == "true",
                 enable_tools=os.getenv("ENABLE_TOOLS", "true").lower() == "true",
             )
         except ValueError as e:

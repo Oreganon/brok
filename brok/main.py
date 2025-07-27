@@ -1,4 +1,4 @@
-"""Main module for brok application."""
+"""Main entry point for the brok chatbot."""
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from brok.llm.ollama import OllamaProvider
 from brok.prompts import (
     PromptTemplate,
     XMLPromptTemplate,
+    create_custom_lightweight_xml_template,
     create_custom_template,
-    create_custom_xml_template,
+    get_optimal_xml_template,
     get_prompt_template,
-    get_xml_prompt_template,
 )
 
 
@@ -153,20 +153,23 @@ async def main() -> None:
             wsggpy_reconnect_backoff=config.wsggpy_reconnect_backoff,
         )
 
-        # Create prompt template based on configuration (KEP-002 Increment B)
+        # Create prompt template based on configuration (KEP-002 Increment B & D)
         prompt_template: PromptTemplate | XMLPromptTemplate
         if config.xml_prompt_formatting:
-            # Use XMLPromptTemplate when XML formatting is enabled
+            # Use optimal XML template (automatically selects lightweight for 2B models)
             if config.prompt_style == "custom":
                 if config.custom_system_prompt is None:
                     raise ValueError(
                         "custom_system_prompt must be provided when using custom prompt style"
                     )
-                prompt_template = create_custom_xml_template(
+                prompt_template = create_custom_lightweight_xml_template(
                     config.custom_system_prompt
                 )
             else:
-                prompt_template = get_xml_prompt_template(config.prompt_style)
+                prompt_template = get_optimal_xml_template(
+                    config.prompt_style,
+                    config.llm_model,  # Automatic 2B model detection
+                )
         # Use regular PromptTemplate for backward compatibility
         elif config.prompt_style == "custom":
             if config.custom_system_prompt is None:
@@ -183,6 +186,7 @@ async def main() -> None:
             max_tokens=config.llm_max_tokens,
             temperature=config.llm_temperature,
             timeout_seconds=config.llm_timeout_seconds,
+            log_prompt_tokens=config.log_prompt_tokens,  # Enable prompt logging if configured
         )
 
         llm_provider: LLMProvider

@@ -6,8 +6,8 @@ optimized for smaller models (2B parameters) where token efficiency is critical.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
+import time
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -16,11 +16,14 @@ if TYPE_CHECKING:
     # Define encoding protocol for type checking
     class EncodingProtocol(Protocol):
         """Protocol for tiktoken Encoding for type checking."""
+
         def encode(self, text: str) -> list[int]: ...
 
-# Handle tiktoken import 
+
+# Handle tiktoken import
 try:
     import tiktoken
+
     _TIKTOKEN_AVAILABLE = True
 except ImportError:
     tiktoken = None  # type: ignore[assignment]

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
+import time
 
 # Import for KEP-002 Increment B structured context
 from typing import TYPE_CHECKING, Any
@@ -14,6 +16,9 @@ from brok.token_counter import get_token_counter
 
 if TYPE_CHECKING:
     from brok.chat import ContextMessage
+
+# Module logger
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -29,6 +34,10 @@ class PromptTemplate:
         user_input: str,
         context: str | None = None,
         tools_description: str | None = None,
+        xml_formatting: bool = False,  # For compatibility with subclasses
+        context_messages: list[ContextMessage] | None = None,  # For compatibility
+        tool_schemas: list[dict[str, Any]] | None = None,  # For compatibility
+        log_tokens: bool = False,
     ) -> str:
         """Build a complete prompt from user input and optional context.
 
@@ -36,10 +45,16 @@ class PromptTemplate:
             user_input: The user's message
             context: Optional conversation context
             tools_description: Optional description of available tools
+            xml_formatting: Ignored in base class (for subclass compatibility)
+            context_messages: Ignored in base class (for subclass compatibility)
+            tool_schemas: Ignored in base class (for subclass compatibility)
+            log_tokens: Whether to log token metrics (for performance monitoring)
 
         Returns:
             str: The complete formatted prompt
         """
+        start_time = time.perf_counter()
+        
         parts = []
 
         # Add system prompt if provided
@@ -63,7 +78,91 @@ class PromptTemplate:
         parts.append(f"{self.user_prefix}: {user_input}")
         parts.append(f"{self.assistant_prefix}:")
 
-        return "\n\n".join(parts)
+        prompt = "\n\n".join(parts)
+        
+        # Log prompt metrics if requested
+        if log_tokens:
+            generation_time_ms = (time.perf_counter() - start_time) * 1000
+            self._log_prompt_metrics(
+                prompt_type="text",
+                prompt=prompt,
+                generation_time_ms=generation_time_ms,
+                user_input=user_input,
+                has_context=bool(context and context.strip()),
+                has_tools=bool(tools_description and tools_description.strip()),
+            )
+
+        return prompt
+
+    def _log_prompt_metrics(
+        self,
+        prompt_type: str,
+        prompt: str,
+        generation_time_ms: float,
+        user_input: str,
+        has_context: bool = False,
+        has_tools: bool = False,
+        xml_overhead_pct: float | None = None,
+    ) -> None:
+        """Log prompt metrics for performance monitoring.
+
+        Args:
+            prompt_type: Type of prompt (text, xml, lightweight_xml)
+            prompt: The generated prompt
+            generation_time_ms: Time taken to generate prompt
+            user_input: Original user input
+            has_context: Whether context was included
+            has_tools: Whether tools were included
+            xml_overhead_pct: XML overhead percentage (if applicable)
+        """
+        char_count = len(prompt)
+
+        # Get token count efficiently
+        token_counter = get_token_counter()
+        token_measurement = token_counter.count_tokens(prompt)
+
+        # Determine log level based on performance
+        if generation_time_ms > 10:  # > 10ms
+            log_level = logging.WARNING
+            perf_status = "SLOW"
+        elif generation_time_ms > 5:  # > 5ms
+            log_level = logging.INFO
+            perf_status = "MODERATE"
+        else:
+            log_level = logging.DEBUG
+            perf_status = "FAST"
+
+        # Base metrics
+        metrics_parts = [
+            f"type={prompt_type}",
+            f"chars={char_count}",
+            f"tokens={token_measurement.token_count}",
+            f"efficiency={token_measurement.efficiency_ratio:.3f}",
+            f"gen_time={generation_time_ms:.2f}ms",
+        ]
+
+        # Optional metrics
+        if has_context:
+            metrics_parts.append("context=yes")
+        if has_tools:
+            metrics_parts.append("tools=yes")
+        if xml_overhead_pct is not None:
+            metrics_parts.append(f"xml_overhead={xml_overhead_pct:.1f}%")
+
+        # Performance status
+        metrics_parts.append(f"perf={perf_status}")
+
+        logger.log(
+            log_level,
+            f"Prompt generated [{prompt_type.upper()}]: {', '.join(metrics_parts)}",
+        )
+
+        # Additional debug info for development
+        logger.debug(
+            f"Prompt details - User input: '{user_input[:50]}{'...' if len(user_input) > 50 else ''}', "
+            f"Encoding: {token_measurement.encoding_used}, "
+            f"Token measurement time: {token_measurement.measurement_time_ms:.2f}ms"
+        )
 
 
 @dataclass
@@ -83,6 +182,7 @@ class XMLPromptTemplate(PromptTemplate):
         xml_formatting: bool = False,
         context_messages: list[ContextMessage] | None = None,
         tool_schemas: list[dict[str, Any]] | None = None,
+        log_tokens: bool = False,
     ) -> str:
         """Build a complete prompt with optional XML formatting.
 
@@ -93,17 +193,48 @@ class XMLPromptTemplate(PromptTemplate):
             xml_formatting: Whether to use XML structure (KEP-002)
             context_messages: Optional structured context messages (KEP-002 Increment B)
             tool_schemas: Optional structured tool schemas (KEP-002 Increment C)
+            log_tokens: Whether to log token metrics (for performance monitoring)
 
         Returns:
             str: The complete formatted prompt
         """
+        start_time = time.perf_counter()
+
         if not xml_formatting:
             # When XML formatting is disabled, delegate to parent for identical output
-            return super().build_prompt(user_input, context, tools_description)
+            return super().build_prompt(
+                user_input, context, tools_description, log_tokens
+            )
 
-        return self._build_xml_prompt(
+        xml_prompt = self._build_xml_prompt(
             user_input, context, tools_description, context_messages, tool_schemas
         )
+
+        # Log XML prompt metrics if requested
+        if log_tokens:
+            generation_time_ms = (time.perf_counter() - start_time) * 1000
+
+            # Calculate XML overhead by comparing to text version
+            text_prompt = super().build_prompt(
+                user_input, context, tools_description, False
+            )
+            xml_overhead_pct = (
+                (len(xml_prompt) - len(text_prompt)) / len(text_prompt)
+            ) * 100
+
+            self._log_prompt_metrics(
+                prompt_type="xml",
+                prompt=xml_prompt,
+                generation_time_ms=generation_time_ms,
+                user_input=user_input,
+                has_context=bool((context and context.strip()) or context_messages),
+                has_tools=bool(
+                    (tools_description and tools_description.strip()) or tool_schemas
+                ),
+                xml_overhead_pct=xml_overhead_pct,
+            )
+
+        return xml_prompt
 
     def _build_xml_prompt(
         self,
@@ -445,6 +576,103 @@ class LightweightXMLPromptTemplate(XMLPromptTemplate):
         """Initialize with token counter for optimization."""
         super().__init__(*args, **kwargs)
         self._token_counter = get_token_counter()
+
+    def build_prompt(
+        self,
+        user_input: str,
+        context: str | None = None,
+        tools_description: str | None = None,
+        xml_formatting: bool = False,
+        context_messages: list[ContextMessage] | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
+        log_tokens: bool = False,
+    ) -> str:
+        """Build prompt with enhanced logging for 2B model optimization metrics.
+
+        Args:
+            user_input: The user's message
+            context: Optional conversation context (legacy string format)
+            tools_description: Optional description of available tools (legacy format)
+            xml_formatting: Whether to use XML structure (KEP-002)
+            context_messages: Optional structured context messages (KEP-002 Increment B)
+            tool_schemas: Optional structured tool schemas (KEP-002 Increment C)
+            log_tokens: Whether to log token metrics (for performance monitoring)
+
+        Returns:
+            str: The complete formatted prompt
+        """
+        start_time = time.perf_counter()
+
+        if not xml_formatting:
+            # Delegate to parent when XML disabled
+            return super().build_prompt(
+                user_input,
+                context,
+                tools_description,
+                xml_formatting,
+                context_messages,
+                tool_schemas,
+                log_tokens,
+            )
+
+        lightweight_prompt = self._build_xml_prompt(
+            user_input, context, tools_description, context_messages, tool_schemas
+        )
+
+        # Enhanced logging for lightweight XML with efficiency comparisons
+        if log_tokens:
+            generation_time_ms = (time.perf_counter() - start_time) * 1000
+
+            # Get comparison prompts for efficiency analysis
+            text_prompt = super().build_prompt(
+                user_input, context, tools_description, False
+            )
+
+            # Create regular XML for comparison (instantiate XMLPromptTemplate)
+            regular_xml_template = XMLPromptTemplate(
+                system_prompt=self.system_prompt,
+                user_prefix=self.user_prefix,
+                assistant_prefix=self.assistant_prefix,
+            )
+            regular_xml_prompt = regular_xml_template._build_xml_prompt(
+                user_input, context, tools_description, context_messages, tool_schemas
+            )
+
+            # Calculate efficiency metrics
+            text_len = len(text_prompt)
+            regular_xml_len = len(regular_xml_prompt)
+            lightweight_len = len(lightweight_prompt)
+
+            text_overhead_pct = ((lightweight_len - text_len) / text_len) * 100
+            xml_efficiency_pct = (
+                (regular_xml_len - lightweight_len) / regular_xml_len
+            ) * 100
+
+            # Enhanced logging with comparison metrics
+            self._log_prompt_metrics(
+                prompt_type="lightweight_xml",
+                prompt=lightweight_prompt,
+                generation_time_ms=generation_time_ms,
+                user_input=user_input,
+                has_context=bool((context and context.strip()) or context_messages),
+                has_tools=bool(
+                    (tools_description and tools_description.strip()) or tool_schemas
+                ),
+                xml_overhead_pct=text_overhead_pct,
+            )
+
+            # Additional efficiency comparison log
+            logger.info(
+                f"XML Efficiency Comparison - "
+                f"Text: {text_len} chars, "
+                f"Regular XML: {regular_xml_len} chars, "
+                f"Lightweight XML: {lightweight_len} chars | "
+                f"Savings vs Regular: {xml_efficiency_pct:.1f}%, "
+                f"Overhead vs Text: {text_overhead_pct:.1f}% | "
+                f"2B Model Optimized: {lightweight_len < 400 and text_overhead_pct < 50}"
+            )
+
+        return lightweight_prompt
 
     def _build_xml_prompt(
         self,

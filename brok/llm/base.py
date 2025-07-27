@@ -20,6 +20,7 @@ class LLMConfig:
     max_tokens: int = 150
     temperature: float = 0.7
     timeout_seconds: int = 30
+    log_prompt_tokens: bool = False  # Enable prompt token logging for monitoring
 
 
 class LLMMetadata(TypedDict, total=False):
