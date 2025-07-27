@@ -286,15 +286,18 @@ class ToolParser:
         # DateTime tool detection
         if "datetime" in self.available_tools:
             datetime_patterns = [
-                r"what\s+time\s+is\s+it(?:\s+in\s+([a-zA-Z\s,/]+))?",
-                r"current\s+time(?:\s+in\s+([a-zA-Z\s,/]+))?",
+                r"what\s+time\s+is\s+it(?:\s+in\s+([a-zA-Z][a-zA-Z\s,/]{1,30}))?",
+                r"current\s+time(?:\s+in\s+([a-zA-Z][a-zA-Z\s,/]{1,30}))?",
+                r"what['']?s\s+(?:the\s+)?current\s+date",  # Handle contractions
                 r"what\s+(?:is\s+)?(?:the\s+)?current\s+date",
+                r"what['']?s\s+(?:the\s+)?date",  # Handle contractions
                 r"what\s+(?:is\s+)?(?:the\s+)?date",
                 r"get\s+(?:me\s+)?(?:the\s+)?(?:current\s+)?(?:date\s+and\s+)?time",
                 r"show\s+(?:me\s+)?(?:the\s+)?(?:current\s+)?(?:date\s+and\s+)?time",
                 r"tell\s+me\s+(?:the\s+)?(?:current\s+)?(?:date\s+and\s+)?time",
                 r"(?:current\s+)?datetime",
-                r"time\s+in\s+([a-zA-Z\s,/]+)",
+                # More precise time zone pattern - only match common timezone formats
+                r"(?:what\s+)?time\s+in\s+((?:new\s+york|london|tokyo|paris|berlin|sydney|utc|est|pst|cst|mst|gmt|[a-z]{3,4})\b)",
             ]
 
             for pattern in datetime_patterns:
@@ -303,14 +306,21 @@ class ToolParser:
                     # Check if timezone was captured
                     if match.groups() and match.group(1):
                         timezone = match.group(1).strip()
-                        logger.debug(
-                            f"Parsed natural language datetime request with timezone: {timezone}"
-                        )
-                        return ToolCall(
-                            tool_name="datetime",
-                            parameters={"timezone": timezone},
-                            raw_text=response,
-                        )
+
+                        # Additional validation: timezone should be reasonable length and format
+                        if self._is_valid_timezone_request(timezone):
+                            logger.debug(
+                                f"Parsed natural language datetime request with timezone: {timezone}"
+                            )
+                            return ToolCall(
+                                tool_name="datetime",
+                                parameters={"timezone": timezone},
+                                raw_text=response,
+                            )
+                        else:
+                            logger.debug(
+                                f"Rejected invalid timezone in datetime request: '{timezone}'"
+                            )
                     else:
                         logger.debug("Parsed natural language datetime request")
                         return ToolCall(
@@ -403,3 +413,57 @@ class ToolParser:
                 f"Response snippet: '{response[:100]}...'. "
                 f"Available tools: {sorted(self.available_tools) if self.available_tools else 'none'}"
             )
+
+    def _is_valid_timezone_request(self, timezone: str) -> bool:
+        """Validate that a timezone string looks like a real timezone request.
+
+        Args:
+            timezone: The timezone string to validate
+
+        Returns:
+            bool: True if it looks like a valid timezone request
+        """
+        timezone_lower = timezone.lower()
+
+        # Too long to be a reasonable timezone
+        if len(timezone) > 30:
+            return False
+
+        # Common timezone indicators
+        valid_timezone_words = {
+            "new",
+            "york",
+            "los",
+            "angeles",
+            "london",
+            "tokyo",
+            "paris",
+            "berlin",
+            "sydney",
+            "chicago",
+            "denver",
+            "utc",
+            "gmt",
+            "est",
+            "pst",
+            "cst",
+            "mst",
+            "edt",
+            "pdt",
+            "cdt",
+            "mdt",
+            "america",
+            "europe",
+            "asia",
+            "australia",
+            "pacific",
+            "mountain",
+            "central",
+            "eastern",
+        }
+
+        # Split timezone into words
+        words = re.findall(r"[a-z]+", timezone_lower)
+
+        # Must have at least one word that's a timezone indicator
+        return len(words) <= 5 and any(word in valid_timezone_words for word in words)

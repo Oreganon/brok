@@ -476,6 +476,116 @@ class TestDateTimeTool:
         assert "Invalid timezone" in result.error
 
 
+class TestDateTimeToolParserFalsePositives:
+    """Test cases to prevent false positives in datetime tool detection."""
+
+    def test_story_text_not_detected_as_datetime(self):
+        """Test that story text with 'time in' is not detected as datetime tool."""
+        parser = ToolParser(available_tools=["datetime"])
+
+        story_text = "Once upon a time in a lush green valley, there lived a goat named Billy. Billy was no ordinary goat;"
+
+        result = parser.parse_response(story_text)
+
+        # Should NOT detect this as a datetime tool call
+        assert result is None
+
+    def test_other_false_positive_scenarios(self):
+        """Test other potential false positive scenarios."""
+        parser = ToolParser(available_tools=["datetime"])
+
+        false_positive_texts = [
+            "I had a great time in the park yesterday",
+            "She spent time in the library studying",
+            "The time in between meetings was productive",
+            "He wasted time in traffic",
+            "Time in prison changed him",
+            "We had a wonderful time in Spain",
+            "The movie was about time travel",
+            "Time is money, as they say",
+        ]
+
+        for text in false_positive_texts:
+            result = parser.parse_response(text)
+            assert result is None, f"False positive detected for: '{text}'"
+
+    def test_valid_timezone_requests_still_work(self):
+        """Test that valid timezone requests are still properly detected."""
+        parser = ToolParser(available_tools=["datetime"])
+
+        valid_requests = [
+            ("What time is it in London?", "london"),
+            ("Current time in New York", "new york"),
+            ("What time is it in Tokyo?", "tokyo"),
+            ("time in EST", "est"),
+            ("What's the time in PST", "pst"),
+            ("time in UTC", "utc"),
+        ]
+
+        for request, expected_timezone in valid_requests:
+            result = parser.parse_response(request)
+            assert result is not None, f"Valid request not detected: '{request}'"
+            assert result.tool_name == "datetime"
+            assert result.parameters.get("timezone") == expected_timezone
+
+    def test_timezone_validation_function(self):
+        """Test the timezone validation function directly."""
+        parser = ToolParser(available_tools=["datetime"])
+
+        # Valid timezones
+        valid_timezones = [
+            "london",
+            "new york",
+            "tokyo",
+            "est",
+            "pst",
+            "america/new_york",
+            "europe/london",
+        ]
+
+        for tz in valid_timezones:
+            assert parser._is_valid_timezone_request(tz), (
+                f"Valid timezone rejected: '{tz}'"
+            )
+
+        # Invalid timezones (false positives)
+        invalid_timezones = [
+            "a lush green valley, there lived a goat named billy",
+            "the park yesterday",
+            "the library studying",
+            "between meetings was productive",
+            "prison changed him",
+            "this very long string that definitely is not a timezone name",
+        ]
+
+        for tz in invalid_timezones:
+            assert not parser._is_valid_timezone_request(tz), (
+                f"Invalid timezone accepted: '{tz}'"
+            )
+
+    def test_datetime_without_timezone_still_works(self):
+        """Test that datetime requests without timezone still work."""
+        parser = ToolParser(available_tools=["datetime"])
+
+        simple_requests = [
+            "What time is it?",
+            "Current time",
+            "What's the current date?",
+            "Get me the time",
+            "Show me the current datetime",
+        ]
+
+        for request in simple_requests:
+            result = parser.parse_response(request)
+            assert result is not None, (
+                f"Simple datetime request not detected: '{request}'"
+            )
+            assert result.tool_name == "datetime"
+            assert (
+                "timezone" not in result.parameters or not result.parameters["timezone"]
+            )
+
+
 class TestToolValidationAndErrorHandling:
     """Test improved tool validation and error handling."""
 

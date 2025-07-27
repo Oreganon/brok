@@ -34,9 +34,9 @@ class PromptTemplate:
         user_input: str,
         context: str | None = None,
         tools_description: str | None = None,
-        xml_formatting: bool = False,  # For compatibility with subclasses
-        context_messages: list[ContextMessage] | None = None,  # For compatibility
-        tool_schemas: list[dict[str, Any]] | None = None,  # For compatibility
+        xml_formatting: bool = False,  # For compatibility with subclasses  # noqa: ARG002
+        context_messages: list[ContextMessage] | None = None,  # For compatibility  # noqa: ARG002
+        tool_schemas: list[dict[str, Any]] | None = None,  # For compatibility  # noqa: ARG002
         log_tokens: bool = False,
     ) -> str:
         """Build a complete prompt from user input and optional context.
@@ -54,7 +54,7 @@ class PromptTemplate:
             str: The complete formatted prompt
         """
         start_time = time.perf_counter()
-        
+
         parts = []
 
         # Add system prompt if provided
@@ -79,7 +79,7 @@ class PromptTemplate:
         parts.append(f"{self.assistant_prefix}:")
 
         prompt = "\n\n".join(parts)
-        
+
         # Log prompt metrics if requested
         if log_tokens:
             generation_time_ms = (time.perf_counter() - start_time) * 1000

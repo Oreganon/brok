@@ -1336,8 +1336,10 @@ class TestPromptTokenLogging:
         template = PromptTemplate(system_prompt="Test")
 
         # Test with different generation times by mocking
-        with patch('brok.prompts.time.perf_counter') as mock_time, \
-             patch('brok.prompts.logger') as mock_logger:
+        with (
+            patch("brok.prompts.time.perf_counter") as mock_time,
+            patch("brok.prompts.logger") as mock_logger,
+        ):
             # Mock slow generation (>10ms)
             mock_time.side_effect = [0.0, 0.015]  # 15ms
 
@@ -1345,12 +1347,15 @@ class TestPromptTokenLogging:
                 prompt_type="test",
                 prompt="test prompt",
                 generation_time_ms=15.0,
-                user_input="test input"
+                user_input="test input",
             )
 
             # Should use WARNING level for slow generation
-            warning_calls = [call for call in mock_logger.log.call_args_list
-                           if call[0][0] == logging.WARNING]
+            warning_calls = [
+                call
+                for call in mock_logger.log.call_args_list
+                if call[0][0] == logging.WARNING
+            ]
             assert len(warning_calls) > 0
 
             # Check that performance status is included
@@ -1361,11 +1366,9 @@ class TestPromptTokenLogging:
         """Test that token efficiency metrics are properly logged."""
         template = LightweightXMLPromptTemplate(system_prompt="Be helpful")
 
-        with patch('brok.prompts.logger') as mock_logger:
+        with patch("brok.prompts.logger") as mock_logger:
             template.build_prompt(
-                "What's the weather?",
-                xml_formatting=True,
-                log_tokens=True
+                "What's the weather?", xml_formatting=True, log_tokens=True
             )
 
             # Should include efficiency metrics
