@@ -377,7 +377,7 @@ class ChatClient:
             self._is_connected = True
 
             auth_status = "authenticated" if jwt_token else "anonymous"
-            logger.info(f"✅ Connected to {environment} chat ({auth_status})")
+            logger.info(f"Connected to {environment} chat ({auth_status})")
 
         except Exception as e:
             logger.exception("Failed to connect to chat")
@@ -1218,7 +1218,7 @@ class ChatClient:
             event: The disconnect event (unused)
             session: The wsggpy session (unused)
         """
-        logger.warning("🔌 Chat connection lost - wsggpy detected disconnection")
+        logger.warning("Chat connection lost - wsggpy detected disconnection")
         self._is_connected = False
 
     def _on_reconnecting(self, _event: Any, _session: AsyncSession) -> None:
@@ -1230,7 +1230,7 @@ class ChatClient:
             event: The reconnecting event (unused)
             session: The wsggpy session (unused)
         """
-        logger.info("🔄 Chat reconnection attempt in progress...")
+        logger.info("Chat reconnection attempt in progress...")
         self._is_connected = False
 
     def _on_reconnected(self, _event: Any, _session: AsyncSession) -> None:
@@ -1242,7 +1242,7 @@ class ChatClient:
             event: The reconnected event (unused)
             session: The wsggpy session (unused)
         """
-        logger.info("✅ Chat reconnection successful!")
+        logger.info("Chat reconnection successful!")
         self._is_connected = True
         self._chat_stats.reconnections += 1
 
@@ -1255,7 +1255,7 @@ class ChatClient:
             event: The reconnect failed event (unused)
             session: The wsggpy session (unused)
         """
-        logger.error("❌ Chat reconnection failed - all attempts exhausted")
+        logger.error("Chat reconnection failed - all attempts exhausted")
         self._is_connected = False
 
     def is_reconnecting(self) -> bool:
@@ -1294,11 +1294,11 @@ class ChatClient:
             raise ChatConnectionError("No session available for reconnection")
 
         if hasattr(self._session, "force_reconnect"):
-            logger.info("🔄 Forcing chat reconnection...")
+            logger.info("Forcing chat reconnection...")
             await self._session.force_reconnect()
         else:
             # Fallback: disconnect and reconnect manually
-            logger.info("🔄 Forcing reconnection via disconnect/connect...")
+            logger.info("Forcing reconnection via disconnect/connect...")
             await self.disconnect()
             # Note: The caller should handle reconnection in this case
 

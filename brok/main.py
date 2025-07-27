@@ -215,12 +215,12 @@ async def main() -> None:
         await bot.start()
 
     except ConfigurationError as e:
-        print(f"❌ Configuration error: {e}")
+        print(f"Configuration error: {e}")
         return
     except KeyboardInterrupt:
-        print("\n🛑 Interrupted by user")
+        print("\nInterrupted by user")
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         logging.getLogger(__name__).exception("Unexpected error in main")
     finally:
         # Ensure LLM provider cleanup even if startup fails

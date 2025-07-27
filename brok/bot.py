@@ -402,9 +402,9 @@ class ChatBot:
 
                 # Enhanced connection status logging
                 if is_reconnecting:
-                    logger.info("🔄 wsggpy is handling reconnection...")
+                    logger.info("wsggpy is handling reconnection...")
                 elif not is_connected:
-                    logger.warning("🔌 Chat connection is down")
+                    logger.warning("Chat connection is down")
                     self._stats.errors_count += 1
                     consecutive_failures += 1
 
@@ -427,7 +427,7 @@ class ChatBot:
                             break
                 # Connection is healthy - reset failure counter
                 elif consecutive_failures > 0:
-                    logger.info("✅ Chat connection restored!")
+                    logger.info("Chat connection restored!")
                     consecutive_failures = 0
 
                 # Detect stale connections (no messages for extended periods)
@@ -471,12 +471,18 @@ class ChatBot:
             is_connected: Whether chat is connected
             is_reconnecting: Whether reconnection is in progress
         """
-        status_emoji = "✅" if is_connected else "🔄" if is_reconnecting else "❌"
+        status_text = (
+            "Connected"
+            if is_connected
+            else "Reconnecting"
+            if is_reconnecting
+            else "Disconnected"
+        )
         connection_attempts = conn_info.get("connection_attempts", 0)
         last_error = conn_info.get("last_error")
 
         logger.info(
-            f"{status_emoji} Connection Status - "
+            f"Connection Status ({status_text}) - "
             f"Connected: {is_connected}, "
             f"Reconnecting: {is_reconnecting}, "
             f"Attempts: {connection_attempts}"
@@ -628,7 +634,7 @@ class ChatBot:
 
             # Enhanced logging with performance data
             logger.info(
-                f"📊 Bot Performance Stats - "
+                f"Bot Performance Stats - "
                 f"Uptime: {uptime:.0f}s, "
                 f"Messages: {self._stats.messages_processed} ({message_rate:.2f}/s), "
                 f"Responses: {self._stats.responses_sent} ({response_rate:.2f}/s), "
@@ -638,7 +644,7 @@ class ChatBot:
             # Performance metrics
             if self._stats.responses_sent > 0:
                 logger.info(
-                    f"⚡ Response Times - "
+                    f"Response Times - "
                     f"Avg: {self._stats.avg_response_time:.2f}s, "
                     f"Min: {self._stats.min_response_time:.2f}s, "
                     f"Max: {self._stats.max_response_time:.2f}s"
@@ -646,7 +652,7 @@ class ChatBot:
 
             # Queue and resource metrics
             logger.info(
-                f"📋 Resources - "
+                f"Resources - "
                 f"Queue: {self._stats.current_queue_size} (max: {self._stats.max_queue_size}), "
                 f"Timeouts: {self._stats.llm_timeouts}, "
                 f"Reconnections: {self._stats.chat_reconnections}"
@@ -660,7 +666,7 @@ class ChatBot:
             )
             if total_typed > 0:
                 logger.info(
-                    f"💬 Message Types - "
+                    f"Message Types - "
                     f"Commands: {self._stats.command_messages} "
                     f"({self._stats.command_messages / total_typed:.1%}), "
                     f"Mentions: {self._stats.mention_messages} "
