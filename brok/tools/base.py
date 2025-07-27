@@ -236,8 +236,8 @@ class BaseTool(ABC):
         Returns:
             dict: Cache statistics or None if no cache is configured
         """
-        if hasattr(self._cache, "get_stats"):
-            return self._cache.get_stats()  # type: ignore[attr-defined]
+        if self._cache is not None and hasattr(self._cache, "get_stats"):
+            return self._cache.get_stats()  # type: ignore[no-any-return]
         return None
 
     def get_schema(self) -> dict[str, Any]:
