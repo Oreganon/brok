@@ -62,17 +62,37 @@ class ToolParser:
         # Try JSON format first
         json_call = self._parse_json_format(response)
         if json_call:
+            # Validate tool availability if we have a tool list
+            if self.available_tools and json_call.tool_name not in self.available_tools:
+                logger.warning(
+                    f"JSON format tool call uses unavailable tool '{json_call.tool_name}'. "
+                    f"Available tools: {sorted(self.available_tools)}"
+                )
+                # Still return the call - let the registry handle the error
             return json_call
 
         # Try explicit tool format
         explicit_call = self._parse_explicit_format(response)
         if explicit_call:
+            # Validate tool availability
+            if (
+                self.available_tools
+                and explicit_call.tool_name not in self.available_tools
+            ):
+                logger.warning(
+                    f"Explicit format tool call uses unavailable tool '{explicit_call.tool_name}'. "
+                    f"Available tools: {sorted(self.available_tools)}"
+                )
             return explicit_call
 
         # Try natural language detection
         nl_call = self._parse_natural_language(response)
         if nl_call:
+            # Natural language parsing already checks available tools
             return nl_call
+
+        # Check if response might be attempting a tool call
+        self._check_for_failed_tool_patterns(response)
 
         return None
 
@@ -346,3 +366,40 @@ class ToolParser:
             bool: True if the response contains a tool call
         """
         return self.parse_response(response) is not None
+
+    def _check_for_failed_tool_patterns(self, response: str) -> None:
+        """Check for patterns that might indicate failed tool call attempts."""
+        response_lower = response.lower()
+
+        # Common tool-like patterns that might indicate confusion
+        tool_indicators = [
+            "tool:",
+            '"tool"',
+            "function:",
+            "execute:",
+            "call:",
+            "invoke:",
+            "use tool",
+            "tool call",
+        ]
+
+        # Check for JSON-like structures without proper tool syntax
+        json_like_patterns = [
+            r'\{[^}]*"[^"]*"[^}]*\}',  # Any JSON-like structure
+            r"\{[^}]*tool[^}]*\}",  # Contains 'tool' in braces
+            r"\{[^}]*function[^}]*\}",  # Contains 'function' in braces
+        ]
+
+        has_tool_indicator = any(
+            indicator in response_lower for indicator in tool_indicators
+        )
+        has_json_like = any(
+            re.search(pattern, response_lower) for pattern in json_like_patterns
+        )
+
+        if has_tool_indicator or has_json_like:
+            logger.info(
+                f"Response contains tool-like patterns but no valid tool call was parsed. "
+                f"Response snippet: '{response[:100]}...'. "
+                f"Available tools: {sorted(self.available_tools) if self.available_tools else 'none'}"
+            )

@@ -284,6 +284,30 @@ class ChatBot:
             f"Tool call detected from {sender}: {tool_call.tool_name} with params {tool_call.parameters}"
         )
 
+        # Validate tool exists before attempting execution
+        if not self._tool_registry.has_tool(tool_call.tool_name):
+            available_tools = self._tool_registry.get_available_tools()
+            logger.warning(
+                f"LLM attempted to use unknown tool '{tool_call.tool_name}'. "
+                f"Available tools: {available_tools}"
+            )
+
+            # Provide helpful feedback instead of forwarding to chat
+            if available_tools:
+                tools_list = ", ".join(available_tools)
+                error_msg = (
+                    f"I don't have access to the '{tool_call.tool_name}' tool. "
+                    f"I can use these tools: {tools_list}. "
+                    f"Please try rephrasing your request using one of the available tools."
+                )
+            else:
+                error_msg = (
+                    "I don't have access to any tools right now. "
+                    "I can only provide information based on my training data."
+                )
+
+            return error_msg
+
         try:
             # Execute the tool
             tool_result = await self._tool_registry.execute_tool(
@@ -301,10 +325,6 @@ class ChatBot:
             else:
                 # Tool execution succeeded
                 return tool_result
-
-        except KeyError:
-            logger.warning(f"Unknown tool requested: {tool_call.tool_name}")
-            return f"Sorry, I don't have access to the '{tool_call.tool_name}' tool."
 
         except Exception as e:
             logger.exception(f"Error executing tool {tool_call.tool_name}")

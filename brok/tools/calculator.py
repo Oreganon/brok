@@ -28,14 +28,32 @@ class CalculatorTool(BaseTool):
 
     name: ClassVar[str] = "calculator"
     description: ClassVar[str] = (
-        "Perform mathematical calculations and evaluate expressions"
+        "Perform mathematical calculations and evaluate expressions safely. "
+        "Supports basic arithmetic (+, -, *, /, ^), trigonometry (sin, cos, tan), "
+        "logarithms (log, log10), square root (sqrt), and common math functions. "
+        "Use 'pi' and 'e' for mathematical constants."
     )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "expression": {
                 "type": "string",
-                "description": "Mathematical expression to evaluate (e.g., '2 + 3 * 4', 'sqrt(16)', 'sin(pi/2)')",
+                "description": (
+                    "Mathematical expression to evaluate. Supports arithmetic operators, "
+                    "parentheses for grouping, mathematical functions like sqrt(), sin(), cos(), "
+                    "and constants like pi and e. Examples: '2 + 3 * 4', 'sqrt(16)', 'sin(pi/2)', "
+                    "'log(10)', '2^3', '(5 + 3) * 2'"
+                ),
+                "examples": [
+                    "2 + 3 * 4",
+                    "sqrt(16)",
+                    "sin(pi/2)",
+                    "log(10)",
+                    "2^3",
+                    "(5 + 3) * 2",
+                    "cos(0)",
+                    "factorial(5)",
+                ],
             }
         },
         "required": ["expression"],

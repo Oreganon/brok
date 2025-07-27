@@ -146,18 +146,33 @@ class XMLPromptTemplate(PromptTemplate):
             self._add_structured_tools(root, tool_schemas)
         elif tools_description and tools_description.strip():
             # Legacy tools format for backward compatibility
-            tools_elem = ET.SubElement(root, "tools", count="1")
+            tools_elem = ET.SubElement(root, "tools", count="1", format="legacy")
 
-            # Add tools description
+            # Add enhanced tools description
             tools_desc_elem = ET.SubElement(tools_elem, "description")
             tools_desc_elem.text = tools_description.strip()
 
-            # Add usage instructions
+            # Add comprehensive usage instructions
             usage_elem = ET.SubElement(tools_elem, "usage_instructions")
             usage_elem.text = (
-                "You can use tools by responding in this format: "
-                '{"tool": "tool_name", "params": {"param": "value"}} '
-                "OR by using natural language like 'Let me check the weather in London'"
+                "TOOL USAGE GUIDELINES:\n"
+                '• Use JSON format for reliability: {"tool": "tool_name", "params": {"key": "value"}}\n'
+                '• Natural language also works: "Let me check the weather in London"\n'
+                "• Only use tools that are explicitly listed in the description above\n"
+                "• Always include required parameters and validate optional ones\n"
+                "• If a tool doesn't exist, apologize and suggest available alternatives\n"
+                "• Never attempt to use tools not documented above"
+            )
+
+            # Add validation requirements
+            validation_elem = ET.SubElement(tools_elem, "validation_requirements")
+            validation_elem.text = (
+                "Before using any tool:\n"
+                "1. Verify the tool exists in the tools description\n"
+                "2. Check all required parameters are provided\n"
+                "3. Validate parameter types match expectations\n"
+                "4. If unsure about usage, ask for clarification\n"
+                "5. Handle errors gracefully and suggest alternatives"
             )
 
         # Add context section if provided (KEP-002 Increment B)
@@ -276,6 +291,18 @@ class XMLPromptTemplate(PromptTemplate):
             root, "tools", count=str(len(tool_schemas)), format="structured"
         )
 
+        # Add tool usage guidelines at the top level
+        guidelines_elem = ET.SubElement(tools_elem, "usage_guidelines")
+        guidelines_elem.text = (
+            "IMPORTANT TOOL USAGE RULES:\n"
+            "• Only use tools that are explicitly listed below\n"
+            '• Use JSON format: {"tool": "tool_name", "params": {"key": "value"}}\n'
+            '• Natural language also works: "Let me check the weather in London"\n'
+            "• Always include required parameters and validate optional ones\n"
+            "• If a tool doesn't exist, apologize and suggest available alternatives\n"
+            "• Never attempt to use tools not in this list"
+        )
+
         for tool_schema in tool_schemas:
             tool_name = tool_schema.get("name", "unknown")
             description = tool_schema.get("description", "")
@@ -283,7 +310,11 @@ class XMLPromptTemplate(PromptTemplate):
 
             # Create individual tool element
             tool_elem = ET.SubElement(
-                tools_elem, "tool", name=tool_name, category="function"
+                tools_elem,
+                "tool",
+                name=tool_name,
+                category="function",
+                available="true",
             )
 
             # Add description
@@ -306,34 +337,68 @@ class XMLPromptTemplate(PromptTemplate):
                         type=param_schema.get("type", "string"),
                         required=str(param_name in required_params).lower(),
                     )
+
+                    # Set parameter description
                     param_elem.text = param_schema.get("description", "")
 
-            # Add usage example
-            self._add_tool_usage_example(tool_elem, tool_name, parameters)
+                    # Add examples if available
+                    examples = param_schema.get("examples", [])
+                    if examples:
+                        examples_elem = ET.SubElement(param_elem, "examples")
+                        for example in examples[:3]:  # Limit to 3 examples
+                            example_elem = ET.SubElement(examples_elem, "example")
+                            example_elem.text = str(example)
 
-    def _add_tool_usage_example(
-        self, tool_elem: ET.Element, tool_name: str, parameters: dict[str, Any]
-    ) -> None:
-        """Add usage example for a tool.
+                # Add usage examples section
+                examples_elem = ET.SubElement(tool_elem, "usage_examples")
 
-        Args:
-            tool_elem: Tool XML element to add example to
-            tool_name: Name of the tool
-            parameters: Parameters schema dictionary
-        """
-        # Create example usage with explicit Any type for mixed values
+                # JSON example
+                json_example_elem = ET.SubElement(examples_elem, "json_format")
+                json_example = self._generate_json_example(tool_name, parameters)
+                json_example_elem.text = json_example
+
+                # Natural language examples
+                nl_examples = self._generate_natural_language_examples(tool_name)
+                if nl_examples:
+                    nl_elem = ET.SubElement(examples_elem, "natural_language")
+                    for example in nl_examples[:2]:  # Limit to 2 examples
+                        example_elem = ET.SubElement(nl_elem, "example")
+                        example_elem.text = example
+
+        # Add validation rules at the end
+        validation_elem = ET.SubElement(tools_elem, "validation_rules")
+        validation_elem.text = (
+            "Before using any tool:\n"
+            "1. Verify the tool name exists in the list above\n"
+            "2. Check that all required parameters are provided\n"
+            "3. Validate parameter types and formats\n"
+            "4. If unsure, ask for clarification rather than guessing\n"
+            "5. If a tool fails, explain what went wrong and suggest alternatives"
+        )
+
+    def _generate_json_example(self, tool_name: str, parameters: dict[str, Any]) -> str:
+        """Generate a JSON usage example for a tool."""
         example_params: dict[str, Any] = {}
         properties = parameters.get("properties", {})
 
-        # Generate example values for parameters
+        # Generate realistic example values for parameters
         for param_name, param_schema in properties.items():
             param_type = param_schema.get("type", "string")
-            if param_type == "string":
-                # Use a reasonable example based on parameter name
+            examples = param_schema.get("examples", [])
+
+            if examples:
+                # Use the first example if available
+                example_params[param_name] = examples[0]
+            elif param_type == "string":
+                # Use parameter-specific examples
                 if "city" in param_name.lower():
                     example_params[param_name] = "London"
                 elif "expression" in param_name.lower():
                     example_params[param_name] = "2 + 3 * 4"
+                elif "timezone" in param_name.lower():
+                    example_params[param_name] = "UTC"
+                elif "format" in param_name.lower():
+                    example_params[param_name] = "readable"
                 else:
                     example_params[param_name] = "example_value"
             elif param_type == "number":
@@ -341,24 +406,66 @@ class XMLPromptTemplate(PromptTemplate):
             elif param_type == "boolean":
                 example_params[param_name] = True
 
-        # Create usage example element with JSON
-        usage_elem = ET.SubElement(tool_elem, "usage_example")
-        example_json = json.dumps(
+        return json.dumps(
             {"tool": tool_name, "params": example_params}, separators=(", ", ": ")
         )
-        usage_elem.text = example_json
+
+    def _generate_natural_language_examples(self, tool_name: str) -> list[str]:
+        """Generate natural language usage examples for a tool."""
+        examples = []
+
+        if tool_name == "weather":
+            examples = [
+                "What's the weather like in London?",
+                "Check the weather in New York for me",
+            ]
+        elif tool_name == "calculator":
+            examples = ["Calculate 2 + 3 * 4", "What's the square root of 16?"]
+        elif tool_name == "datetime":
+            examples = ["What time is it?", "What's the current time in Tokyo?"]
+        else:
+            # Generic examples
+            examples = [f"Use the {tool_name} tool", f"Help me with {tool_name}"]
+
+        return examples
 
 
 # Default system prompts for different response styles
 DEFAULT_CONCISE_PROMPT = """You are Brok, a helpful AI assistant in a chat room. When people mention or talk to you, respond to them directly and concisely in 2-3 sentences. Be friendly but brief. Avoid lengthy explanations unless specifically asked. If someone needs detailed information, offer to provide more details if needed.
 
+TOOL USAGE GUIDELINES:
+- Use available tools when they can help answer user questions
+- Only use tools that are explicitly listed in your tool documentation
+- Format tool calls as JSON: {"tool": "tool_name", "params": {"parameter": "value"}}
+- You can also use natural language that triggers tool detection
+- If a tool doesn't exist, apologize and suggest what you can do instead
+- Always validate tool parameters before using them
+
 IMPORTANT: Never mention your own name in responses. Always refer to the people who are talking to you by username. Focus on helping the person who messaged you."""
 
 DEFAULT_DETAILED_PROMPT = """You are Brok, a helpful AI assistant in a chat room. When people mention or talk to you, provide thorough and detailed responses to help them. Be helpful and informative, giving comprehensive answers with examples when appropriate.
 
+TOOL USAGE GUIDELINES:
+- Use available tools whenever they can enhance your response with real-time or computed information
+- Only use tools that are explicitly documented as available to you
+- Format tool calls as JSON: {"tool": "tool_name", "params": {"parameter": "value"}}
+- You can also phrase requests naturally (e.g., "Let me check the weather in London")
+- Always check that required parameters are provided and valid
+- If a requested tool doesn't exist, explain what tools you do have access to
+- Provide context about what the tool does when using it
+
 IMPORTANT: Never mention your own name in responses. Always refer to the people who are talking to you by username. Focus on helping the person who messaged you."""
 
 DEFAULT_ADAPTIVE_PROMPT = """You are Brok, a helpful AI assistant in a chat room. When people mention or talk to you, adapt your response length to the complexity of their question. For simple questions, keep responses brief (1-2 sentences). For complex topics, provide more detailed explanations as needed.
+
+TOOL USAGE GUIDELINES:
+- Use tools when they add value to your response (weather, calculations, time, etc.)
+- Only use tools that are listed in your available tools documentation
+- Prefer JSON format for reliability: {"tool": "tool_name", "params": {"key": "value"}}
+- Natural language works too: "Let me calculate that" or "Let me check the weather"
+- Never attempt to use tools that aren't in your available tools list
+- If asked about unavailable tools, explain what tools you can use instead
+- Always include required parameters and validate optional ones
 
 IMPORTANT: Never mention your own name in responses. Always refer to the people who are talking to you by username. Focus on helping the person who messaged you."""
 

@@ -177,30 +177,54 @@ class ToolRegistry:
         descriptions.append("Available tools:")
 
         for tool in self._tools.values():
-            descriptions.append(f"- {tool.name}: {tool.description}")
+            descriptions.append(f"\n• {tool.name}: {tool.description}")
 
-            # Add parameter information
+            # Add parameter information with enhanced formatting
             properties = tool.parameters.get("properties", {})
             required = tool.parameters.get("required", [])
 
             if properties:
-                params = []
+                descriptions.append("  Parameters:")
                 for param, schema in properties.items():
                     param_desc = schema.get("description", "")
                     param_type = schema.get("type", "unknown")
                     is_required = param in required
+                    examples = schema.get("examples", [])
 
-                    param_str = f"{param} ({param_type})"
+                    param_str = f"    - {param} ({param_type})"
                     if is_required:
-                        param_str += " [required]"
+                        param_str += " [REQUIRED]"
+                    else:
+                        param_str += " [optional]"
+
                     if param_desc:
                         param_str += f": {param_desc}"
 
-                    params.append(param_str)
+                    descriptions.append(param_str)
 
-                descriptions.append(f"  Parameters: {', '.join(params)}")
+                    # Add examples if available
+                    if examples:
+                        example_text = ", ".join(f"'{ex}'" for ex in examples[:3])
+                        descriptions.append(f"      Examples: {example_text}")
 
-        return "\\n".join(descriptions)
+                # Add usage examples
+                descriptions.append("  Usage examples:")
+                descriptions.append(
+                    f'    JSON: {{"tool": "{tool.name}", "params": {{"param": "value"}}}}'
+                )
+                descriptions.append(
+                    f'    Natural: "Let me {tool.name} for you" or mention key terms'
+                )
+
+        descriptions.append("\nIMPORTANT:")
+        descriptions.append("- Only use tools that are listed above")
+        descriptions.append("- Always check parameter requirements before using a tool")
+        descriptions.append("- You can use tools via JSON format or natural language")
+        descriptions.append(
+            "- If a tool doesn't exist, apologize and suggest available alternatives"
+        )
+
+        return "\n".join(descriptions)
 
     def set_shared_cache(
         self, cache: Cache[Any], apply_to_existing: bool = True

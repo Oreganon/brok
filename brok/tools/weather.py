@@ -25,13 +25,27 @@ class WeatherTool(BaseTool):
     """
 
     name: ClassVar[str] = "weather"
-    description: ClassVar[str] = "Get current weather information for a city"
+    description: ClassVar[str] = (
+        "Get current weather information for any city worldwide. "
+        "Provides temperature, conditions, and brief weather description. "
+        "Works with city names like 'London', 'New York', 'Tokyo', or 'San Francisco, CA'."
+    )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "city": {
                 "type": "string",
-                "description": "City name (e.g., 'London', 'New York', 'Tokyo')",
+                "description": (
+                    "Name of the city to get weather for. Can include state/country for clarity. "
+                    "Examples: 'London', 'New York', 'Tokyo', 'Paris, France', 'Austin, TX'"
+                ),
+                "examples": [
+                    "London",
+                    "New York",
+                    "Tokyo",
+                    "Paris, France",
+                    "San Francisco, CA",
+                ],
             }
         },
         "required": ["city"],

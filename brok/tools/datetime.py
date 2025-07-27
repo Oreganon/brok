@@ -58,19 +58,46 @@ class DateTimeTool(BaseTool):
     """
 
     name: ClassVar[str] = "datetime"
-    description: ClassVar[str] = "Get current date and time information"
+    description: ClassVar[str] = (
+        "Get current date and time information in various formats and timezones. "
+        "Can show the current time in different cities, format dates in different styles, "
+        "or provide Unix timestamps. Supports timezone conversion for worldwide time queries."
+    )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "format": {
                 "type": "string",
                 "enum": ["iso", "readable", "date", "time", "timestamp"],
-                "description": "Output format: 'iso' (ISO 8601), 'readable' (human-friendly), 'date' (date only), 'time' (time only), 'timestamp' (Unix timestamp)",
+                "description": (
+                    "Output format for the date/time: "
+                    "'readable' (human-friendly format like 'Monday, January 23, 2025 at 3:30 PM'), "
+                    "'iso' (ISO 8601 format like '2025-01-23T15:30:45'), "
+                    "'date' (date only like '2025-01-23'), "
+                    "'time' (time only like '15:30:45'), "
+                    "'timestamp' (Unix timestamp)"
+                ),
                 "default": "readable",
+                "examples": ["readable", "iso", "date", "time", "timestamp"],
             },
             "timezone": {
                 "type": "string",
-                "description": "Timezone identifier. Use IANA timezone names like 'America/New_York', 'Europe/London', 'UTC'. Common names like 'New York', 'London', 'UTC' are also supported.",
+                "description": (
+                    "Timezone identifier for the time. Use city names like 'New York', 'London', 'Tokyo', "
+                    "timezone abbreviations like 'EST', 'PST', 'UTC', or full IANA timezone names like "
+                    "'America/New_York', 'Europe/London', 'Asia/Tokyo'. Leave empty for system local time."
+                ),
+                "examples": [
+                    "New York",
+                    "London",
+                    "Tokyo",
+                    "UTC",
+                    "EST",
+                    "PST",
+                    "America/New_York",
+                    "Europe/London",
+                    "Asia/Tokyo",
+                ],
             },
         },
         "required": [],
