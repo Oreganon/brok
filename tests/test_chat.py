@@ -1424,3 +1424,25 @@ class TestChatStats:
         updated_stats = chat_client.get_chat_stats()
         assert updated_stats.messages_received == initial_count + 1
         assert updated_stats.last_activity > initial_activity
+
+    @pytest.mark.asyncio
+    async def test_reconnection_resets_last_activity(self, chat_client: ChatClient):
+        """Test that reconnection resets last_activity to prevent stale connection loops."""
+        # Arrange - Set an old last_activity timestamp to simulate stale connection
+        old_timestamp = time.time() - 600  # 10 minutes ago
+        chat_client._chat_stats.last_activity = old_timestamp
+        initial_reconnections = chat_client._chat_stats.reconnections
+
+        # Act - Simulate successful reconnection event
+        mock_session = MagicMock(spec=AsyncSession)
+        chat_client._on_reconnected(None, mock_session)
+
+        # Assert - The key fix: last_activity should be reset to current time
+        stats = chat_client.get_chat_stats()
+        assert stats.last_activity > old_timestamp  # Should be reset to current time
+        assert (
+            stats.last_activity >= time.time() - 1
+        )  # Should be very recent (within 1 second)
+        assert (
+            stats.reconnections == initial_reconnections + 1
+        )  # Should increment reconnection counter

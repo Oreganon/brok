@@ -35,8 +35,10 @@ class PromptTemplate:
         context: str | None = None,
         tools_description: str | None = None,
         xml_formatting: bool = False,  # For compatibility with subclasses  # noqa: ARG002
-        context_messages: list[ContextMessage] | None = None,  # For compatibility  # noqa: ARG002
-        tool_schemas: list[dict[str, Any]] | None = None,  # For compatibility  # noqa: ARG002
+        context_messages: list[ContextMessage]
+        | None = None,  # For compatibility
+        tool_schemas: list[dict[str, Any]]
+        | None = None,  # For compatibility
         log_tokens: bool = False,
     ) -> str:
         """Build a complete prompt from user input and optional context.

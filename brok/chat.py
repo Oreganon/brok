@@ -375,6 +375,8 @@ class ChatClient:
             # Connect to chat
             await self._session.open()
             self._is_connected = True
+            # Initialize last_activity to prevent immediate stale connection detection
+            self._chat_stats.last_activity = time.time()
 
             auth_status = "authenticated" if jwt_token else "anonymous"
             logger.info(f"Connected to {environment} chat ({auth_status})")
@@ -1245,6 +1247,8 @@ class ChatClient:
         logger.info("Chat reconnection successful!")
         self._is_connected = True
         self._chat_stats.reconnections += 1
+        # Reset last_activity to prevent immediate stale connection detection
+        self._chat_stats.last_activity = time.time()
 
     def _on_reconnect_failed(self, _event: Any, _session: AsyncSession) -> None:
         """Handle failed reconnection event from wsggpy.
