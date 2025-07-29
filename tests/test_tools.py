@@ -8,7 +8,7 @@ from typing import ClassVar
 
 import pytest
 
-from brok.prompts import XMLPromptTemplate
+from brok.prompts import PromptTemplate
 from brok.tools import (
     BaseTool,
     CalculatorTool,
@@ -741,16 +741,16 @@ class TestToolValidationAndErrorHandling:
         assert "UTC" in timezone_param["examples"]
 
 
-class TestXMLPromptIntegration:
-    """Test integration with XML prompt formatting."""
+class TestMarkdownPromptIntegration:
+    """Test integration with markdown prompt formatting."""
 
-    def test_xml_prompt_includes_enhanced_tool_info(self):
-        """Test that XML prompts include enhanced tool information."""
+    def test_markdown_prompt_includes_enhanced_tool_info(self):
+        """Test that markdown prompts include enhanced tool information."""
         # Create mock tool schemas with enhanced info
         tool_schemas = [
             {
                 "name": "test_tool",
-                "description": "A test tool for XML integration",
+                "description": "A test tool for markdown integration",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -765,44 +765,28 @@ class TestXMLPromptIntegration:
             }
         ]
 
-        template = XMLPromptTemplate("Test system prompt")
+        template = PromptTemplate("Test system prompt")
         prompt = template.build_prompt(
-            "Test input", xml_formatting=True, tool_schemas=tool_schemas
+            "Test input", tool_schemas=tool_schemas
         )
 
-        # Should include usage guidelines
-        assert "IMPORTANT TOOL USAGE RULES" in prompt
-        assert "Only use tools that are explicitly listed below" in prompt
-        assert "JSON format" in prompt
-        assert "Natural language also works" in prompt
+        # Should include markdown structure
+        assert "## Tools Available" in prompt
+        assert "- **test_tool**: A test tool for markdown integration" in prompt
+        assert "`param1` (string) (required): Test parameter" in prompt
+        assert "**Usage Examples:**" in prompt
+        assert '{"tool": "test_tool"' in prompt
 
-        # Should include validation rules
-        assert "validation_rules" in prompt
-        assert "Verify the tool name exists" in prompt
-
-        # Should include examples
-        assert "examples" in prompt
-        assert "example1" in prompt
-
-        # Should include usage examples
-        assert "usage_examples" in prompt
-        assert "json_format" in prompt
-        assert "natural_language" in prompt
-
-    def test_xml_legacy_format_enhanced(self):
-        """Test that legacy XML format includes enhanced guidelines."""
-        template = XMLPromptTemplate("Test system prompt")
+    def test_markdown_legacy_format_enhanced(self):
+        """Test that legacy tools description works with markdown format."""
+        template = PromptTemplate("Test system prompt")
         tools_description = "Available tools: test_tool - A test tool"
 
         prompt = template.build_prompt(
-            "Test input", xml_formatting=True, tools_description=tools_description
+            "Test input", tools_description=tools_description
         )
 
-        # Should include enhanced usage guidelines
-        assert "TOOL USAGE GUIDELINES" in prompt
-        assert "Use JSON format for reliability" in prompt
-        assert "Only use tools that are explicitly listed" in prompt
-
-        # Should include validation requirements
-        assert "validation_requirements" in prompt
-        assert "Verify the tool exists in the tools description" in prompt
+        # Should include markdown structure
+        assert "## Tools Available" in prompt
+        assert "Available tools: test_tool - A test tool" in prompt
+        assert "**Usage:** Format as JSON" in prompt
