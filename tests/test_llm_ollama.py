@@ -113,7 +113,7 @@ class TestOllamaProvider:
         # Verify that context was included in the request
         call_args = mock_session.post.call_args
         request_data = call_args[1]["json"]
-        assert "Context:" in request_data["prompt"]
+        assert "## Recent Context" in request_data["prompt"]
         assert "user1: Previous message" in request_data["prompt"]
 
     @pytest.mark.asyncio
@@ -269,7 +269,8 @@ class TestOllamaProvider:
         prompt = ollama_provider._build_prompt("Hello", None)
 
         # Assert
-        assert "User: Hello" in prompt
+        assert "## Request" in prompt
+        assert "Hello" in prompt
         assert "Assistant:" in prompt
         assert "helpful AI assistant" in prompt  # Verify system prompt is included
         assert "chat room" in prompt  # Verify context is included
@@ -283,10 +284,11 @@ class TestOllamaProvider:
         prompt = ollama_provider._build_prompt("What's up?", context)
 
         # Assert
-        assert "Context:" in prompt
+        assert "## Recent Context" in prompt
         assert "user1: Hi there" in prompt
         assert "user2: How are you?" in prompt
-        assert "User: What's up?" in prompt
+        assert "## Request" in prompt
+        assert "What's up?" in prompt
         assert "Assistant:" in prompt
 
     @pytest.mark.asyncio

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
 from brok.bot import BotStats, ChatBot
-from brok.chat import ProcessedMessage
+from brok.chat import ChatStats, ProcessedMessage
 from brok.config import BotConfig
 from brok.exceptions import BrokError, LLMProviderError
 
@@ -765,6 +766,11 @@ class TestChatBotReconnection:
         mock_chat_client.force_reconnect = AsyncMock(
             side_effect=Exception("Connection failed")
         )
+
+        # Mock get_chat_stats to return a proper ChatStats object
+        mock_chat_stats = ChatStats(last_activity=time.time())
+        mock_chat_client.get_chat_stats = MagicMock(return_value=mock_chat_stats)
+
         chat_bot._shutdown_event = asyncio.Event()
 
         # Set very low max attempts for testing
