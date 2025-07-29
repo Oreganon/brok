@@ -16,11 +16,7 @@ from brok.llm.base import LLMConfig, LLMProvider
 from brok.llm.llamacpp import LlamaCppProvider
 from brok.llm.ollama import OllamaProvider
 from brok.prompts import (
-    PromptTemplate,
-    XMLPromptTemplate,
-    create_custom_lightweight_xml_template,
     create_custom_template,
-    get_optimal_xml_template,
     get_prompt_template,
 )
 
@@ -153,32 +149,11 @@ async def main() -> None:
             wsggpy_reconnect_backoff=config.wsggpy_reconnect_backoff,
         )
 
-        # Create prompt template based on configuration (KEP-002 Increment B & D)
-        prompt_template: PromptTemplate | XMLPromptTemplate
-        if config.xml_prompt_formatting:
-            # Use optimal XML template (automatically selects lightweight for 2B models)
-            if config.prompt_style == "custom":
-                if config.custom_system_prompt is None:
-                    raise ValueError(
-                        "custom_system_prompt must be provided when using custom prompt style"
-                    )
-                prompt_template = create_custom_lightweight_xml_template(
-                    config.custom_system_prompt
-                )
-            else:
-                prompt_template = get_optimal_xml_template(
-                    config.prompt_style,
-                    config.llm_model,  # Automatic 2B model detection
-                )
-        # Use regular PromptTemplate for backward compatibility
-        elif config.prompt_style == "custom":
-            if config.custom_system_prompt is None:
-                raise ValueError(
-                    "custom_system_prompt must be provided when using custom prompt style"
-                )
+        # Create prompt template
+        if config.custom_system_prompt:
             prompt_template = create_custom_template(config.custom_system_prompt)
         else:
-            prompt_template = get_prompt_template(config.prompt_style)
+            prompt_template = get_prompt_template()
 
         # Create LLM provider
         llm_config = LLMConfig(

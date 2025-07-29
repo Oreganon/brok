@@ -41,11 +41,7 @@ class BotConfig:
     include_bot_responses: bool = True
 
     # Prompt settings
-    prompt_style: str = "concise"  # "concise", "detailed", "adaptive", or "custom"
-    custom_system_prompt: str | None = None  # Used when prompt_style is "custom"
-
-    # XML prompt formatting (KEP-002)
-    xml_prompt_formatting: bool = False  # Feature flag for XML-structured prompts
+    custom_system_prompt: str | None = None  # Override default system prompt
 
     # Connection settings
     max_reconnect_attempts: int = (
@@ -200,22 +196,7 @@ class BotConfig:
             )
 
             # Parse prompt configuration
-            prompt_style = os.getenv("PROMPT_STYLE", "concise").lower()
-            if prompt_style not in ("concise", "detailed", "adaptive", "custom"):
-                raise ConfigurationError(
-                    f"PROMPT_STYLE must be 'concise', 'detailed', 'adaptive', or 'custom', got: {prompt_style}"
-                )
-
             custom_system_prompt = os.getenv("CUSTOM_SYSTEM_PROMPT")
-            if prompt_style == "custom" and not custom_system_prompt:
-                raise ConfigurationError(
-                    "CUSTOM_SYSTEM_PROMPT must be provided when PROMPT_STYLE is 'custom'"
-                )
-
-            # Parse XML prompt formatting flag (KEP-002)
-            xml_prompt_formatting = (
-                os.getenv("XML_PROMPT_FORMATTING", "false").lower() == "true"
-            )
 
             return cls(
                 chat_environment=chat_env,
@@ -237,9 +218,7 @@ class BotConfig:
                 max_context_tokens=max_context_tokens,
                 prioritize_mentions=prioritize_mentions,
                 include_bot_responses=include_bot_responses,
-                prompt_style=prompt_style,
                 custom_system_prompt=custom_system_prompt,
-                xml_prompt_formatting=xml_prompt_formatting,
                 max_reconnect_attempts=max_reconnect_attempts,
                 initial_reconnect_delay=initial_reconnect_delay,
                 max_reconnect_delay=max_reconnect_delay,

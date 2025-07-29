@@ -10,7 +10,7 @@ import aiohttp
 
 from brok.exceptions import LLMConnectionError, LLMGenerationError, LLMTimeoutError
 from brok.llm.base import LLMConfig, LLMMetadata, LLMProvider
-from brok.prompts import PromptTemplate, XMLPromptTemplate, get_prompt_template
+from brok.prompts import PromptTemplate, get_prompt_template
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -57,7 +57,7 @@ class OllamaProvider(LLMProvider):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.config = config
-        self.prompt_template = prompt_template or get_prompt_template("concise")
+        self.prompt_template = prompt_template or get_prompt_template()
         self._session = session
         self._session_lock = asyncio.Lock()
         self._last_metadata: LLMMetadata = {}
@@ -201,34 +201,27 @@ class OllamaProvider(LLMProvider):
         Args:
             prompt: The user's input message
             context: Optional conversation context (legacy string format)
-            context_messages: Optional structured context messages (KEP-002 Increment B)
+            context_messages: Optional structured context messages
 
         Returns:
             str: The complete prompt to send to Ollama
         """
-        # Use structured tools with XMLPromptTemplate (KEP-002 Increment C)
-        if isinstance(self.prompt_template, XMLPromptTemplate):
-            tool_schemas = self.get_tools_schema() if self.has_tools() else None
-            return self.prompt_template.build_prompt(
-                prompt,
-                context,
-                tools_description=None,  # Use structured tools instead
-                xml_formatting=True,
-                context_messages=context_messages,
-                tool_schemas=tool_schemas,
-                log_tokens=self.config.log_prompt_tokens,  # Enable logging if configured
-            )
-        else:
-            # Legacy format for non-XML templates
-            tools_description = (
-                self.get_tools_description() if self.has_tools() else None
-            )
-            return self.prompt_template.build_prompt(
-                prompt,
-                context,
-                tools_description,
-                log_tokens=self.config.log_prompt_tokens,  # Enable logging if configured
-            )
+        # Use structured tools and context when available
+        tool_schemas = self.get_tools_schema() if self.has_tools() else None
+        tools_description = (
+            self.get_tools_description()
+            if self.has_tools() and not tool_schemas
+            else None
+        )
+
+        return self.prompt_template.build_prompt(
+            prompt,
+            context,
+            tools_description,
+            context_messages=context_messages,
+            tool_schemas=tool_schemas,
+            log_tokens=self.config.log_prompt_tokens,
+        )
 
     async def close(self) -> None:
         """Close the HTTP session if we own it."""
