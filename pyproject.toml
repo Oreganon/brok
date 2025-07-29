@@ -2,7 +2,7 @@
 name = "brok"
 version = "0.1.0"
 description = "A chatbot that integrates strims chat with LLM capabilities"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "wsggpy @ git+https://github.com/MemeLabs/wsggpy.git",
     "aiohttp>=3.9.0",
