@@ -175,15 +175,15 @@ class LlamaCppProvider(LLMProvider):
         try:
             # Try the /health endpoint first (if server supports it)
             logger.debug(f"Health check: {self.base_url}/health")
-            async with health_session.get(f"{self.base_url}/health") as response:
-                if response.status == 200:
-                    logger.debug("Health check result: True (via /health)")
-                    return True
-        except Exception:
-            # /health endpoint might not exist, try a minimal completion instead
-            pass
+            try:
+                async with health_session.get(f"{self.base_url}/health") as response:
+                    if response.status == 200:
+                        logger.debug("Health check result: True (via /health)")
+                        return True
+            except Exception:
+                # /health endpoint might not exist, try a minimal completion instead
+                pass
 
-        try:
             # Fallback: minimal completion request
             logger.debug(f"Health check fallback: {self.base_url}/completion")
             payload = {
@@ -197,6 +197,7 @@ class LlamaCppProvider(LLMProvider):
                 is_healthy = bool(response.status == 200)
                 logger.debug(f"Health check result: {is_healthy} (via /completion)")
                 return is_healthy
+
         except Exception as e:
             logger.warning(f"Health check failed: {e}")
             raise LLMConnectionError(f"LlamaCpp health check failed: {e}") from e

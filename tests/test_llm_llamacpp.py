@@ -309,6 +309,31 @@ class TestLlamaCppProvider:
             ):
                 await llamacpp_provider.health_check()
 
+    @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession")
+    async def test_health_check_always_closes_session(
+        self, mock_session_class, llamacpp_provider: LlamaCppProvider
+    ):
+        """Test that health check always closes session, even on success via /health endpoint."""
+        # Arrange
+        mock_session = Mock()
+        mock_session.closed = False
+        mock_session_class.return_value = mock_session
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+
+        # Set up the context manager for successful /health endpoint
+        mock_session.get = Mock(return_value=AsyncContextManagerMock(mock_response))
+        mock_session.close = AsyncMock()
+
+        # Act
+        result = await llamacpp_provider.health_check()
+
+        # Assert
+        assert result is True
+        mock_session.close.assert_called_once()  # This is the key assertion!
+
     def test_build_prompt_without_context(self, llamacpp_provider: LlamaCppProvider):
         """Test prompt building without context."""
         # Act
