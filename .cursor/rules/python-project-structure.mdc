@@ -1,6 +1,7 @@
+
 ---
 alwaysApply: true
-description: "Python project structure and development standards"
+description: "Python project structure and development standards with uv and modern tooling"
 ---
 
 # Python Project Structure & Standards
@@ -10,28 +11,46 @@ description: "Python project structure and development standards"
 - Tests in `tests/` directory, mirroring the source structure
 - Configuration files in the root: [pyproject.toml](mdc:pyproject.toml), [.pre-commit-config.yaml](mdc:.pre-commit-config.yaml)
 - Entry point is [main.py](mdc:main.py) for simple projects or `src/{package_name}/__init__.py` for packages
+- Always include `uv.lock` for reproducible dependency management
 
 ## Code Quality Standards
 - Use **ruff** for linting and formatting (configured in [pyproject.toml](mdc:pyproject.toml))
-- Maintain **100% type coverage** with mypy
-- Write **comprehensive tests** using pytest
+- Maintain **>90% type coverage** with mypy (never accept <90% without justification)
+- Write **comprehensive tests** using pytest with >90% code coverage
 - Follow **PEP 8** style guidelines (enforced by ruff)
 - Use **docstrings** for all public functions, classes, and modules
 - Keep **line length at 88 characters** (Black/ruff default)
 
-## Dependencies Management
+## Dependencies Management with uv
+- **Always use uv** for dependency management - never pip
 - All dependencies declared in [pyproject.toml](mdc:pyproject.toml)
-- Use version pinning for production dependencies
+- Use `uv.lock` for reproducible installations (always commit this file)
+- Create virtual environments with `uv venv`
+- Install dependencies with `uv sync --extra dev`
+- Add new dependencies with `uv add package-name`
 - Separate dev dependencies in `[project.optional-dependencies.dev]`
-- Lock dependencies with `pip-tools` or similar when needed
+
+## Development Workflow with Quality Gates
+- **Before any commit**, run the sacred routine:
+  ```bash
+  ruff format .
+  ruff check --fix .
+  mypy .
+  pytest
+  ```
+- **After every 30-50 lines**, pause and reflect on approach
+- Use virtual environments: `uv venv && source .venv/bin/activate`
+- Never commit broken or untested code
 
 ## Git Workflow
 - Use [.pre-commit-config.yaml](mdc:.pre-commit-config.yaml) for automated checks
-- GitHub Actions in [.github/workflows/](mdc:.github/workflows/) for CI/CD
-- Conventional commit messages
+- GitHub Actions in [.github/workflows/](mdc:.github/workflows/) for CI/CD with uv
+- Conventional commit messages following `type(scope): description`
 - Branch protection with required checks
+- Frequent, small commits after quality checks pass
 
 ## Documentation
 - README with setup, usage, and contribution instructions
 - Inline docstrings following Google or NumPy style
 - Type hints for all function signatures
+- Include uv setup instructions in development documentation

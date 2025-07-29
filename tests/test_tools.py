@@ -766,9 +766,7 @@ class TestMarkdownPromptIntegration:
         ]
 
         template = PromptTemplate("Test system prompt")
-        prompt = template.build_prompt(
-            "Test input", tool_schemas=tool_schemas
-        )
+        prompt = template.build_prompt("Test input", tool_schemas=tool_schemas)
 
         # Should include markdown structure
         assert "## Tools Available" in prompt

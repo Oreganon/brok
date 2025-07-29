@@ -12,25 +12,25 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
       with:
-        python-version: "3.13"
-        cache: "pip"
+        version: "latest"
+    
+    - name: Set up Python
+      run: uv python install 3.13
     
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+      run: uv sync --extra dev
     
     - name: Run ruff linter
-      run: ruff check .
+      run: uv run ruff check .
     
     - name: Run ruff formatter
-      run: ruff format --check .
+      run: uv run ruff format --check .
     
     - name: Run mypy
-      run: mypy .
+      run: uv run mypy .
 
   test:
     runs-on: ubuntu-latest
@@ -41,41 +41,41 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
       with:
-        python-version: ${{ matrix.python-version }}
-        cache: "pip"
+        version: "latest"
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
     
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+      run: uv sync --extra dev
     
     - name: Run tests
-      run: pytest
+      run: uv run pytest
 
   security:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
       with:
-        python-version: "3.13"
-        cache: "pip"
+        version: "latest"
+    
+    - name: Set up Python
+      run: uv python install 3.13
     
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install bandit[toml] safety
+      run: uv sync --extra dev
     
     - name: Run bandit security linter
-      run: bandit -r . -f json -o bandit-report.json || true
+      run: uv run bandit -r . -f json -o bandit-report.json || true
     
     - name: Run safety check
-      run: safety check --json --output safety-report.json || true
+      run: uv run safety check --json --output safety-report.json || true
 
   docker:
     runs-on: ubuntu-latest

@@ -1,3 +1,4 @@
+
 ---
 globs: "Dockerfile*,.dockerignore"
 description: "Docker containerization standards and distroless best practices"
@@ -34,17 +35,24 @@ description: "Docker containerization standards and distroless best practices"
 # Build stage
 FROM python:3.13-slim as builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential && rm -rf /var/lib/apt/lists/*
-COPY pyproject.toml .
-RUN pip install --no-cache-dir --user .
+
+# Install uv
+RUN pip install --no-cache-dir uv
+
+# Copy project files
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies using uv
+RUN uv pip install --system --no-cache .
 
 # Runtime stage
 FROM gcr.io/distroless/python3-debian12:latest
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY brok/ /app/brok/
 COPY main.py /app/
 WORKDIR /app
-ENV PATH=/root/.local/bin:$PATH
+ENV PYTHONPATH=/app
 ENTRYPOINT ["python", "main.py"]
 ```
 

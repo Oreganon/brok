@@ -22,6 +22,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.12.0",
     "pre-commit>=3.6.0",
+    "safety>=3.0.0",
 ]
 
 [build-system]
@@ -100,7 +101,7 @@ exclude = [
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--cov=. --cov-report=term-missing --cov-report=html --cov-fail-under=75"
+addopts = "--cov=. --cov-report=term-missing --cov-report=html --cov-fail-under=79"
 testpaths = ["tests"]
 pythonpath = ["."]
 

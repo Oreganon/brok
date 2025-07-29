@@ -1,16 +1,13 @@
 """Tests for prompt management functionality."""
 
-from datetime import datetime
 import logging
 from typing import Any, ClassVar
 from unittest.mock import patch
 
-import pytest
-
 from brok.prompts import (
     DEFAULT_TEMPLATE,
-    PromptTemplate,
     SYSTEM_PROMPT,
+    PromptTemplate,
     create_custom_template,
     get_prompt_template,
 )
@@ -69,7 +66,9 @@ class TestPromptTemplate:
         """Test building prompt with legacy tools description."""
         template = PromptTemplate(system_prompt="System")
 
-        result = template.build_prompt("Hello", tools_description="weather: Check weather")
+        result = template.build_prompt(
+            "Hello", tools_description="weather: Check weather"
+        )
 
         assert "## Tools Available" in result
         assert "weather: Check weather" in result
@@ -179,9 +178,7 @@ class TestMarkdownStructure:
         tool_schemas = [{"name": "test", "description": "Test tool"}]
 
         result = template.build_prompt(
-            "Hello",
-            context="Previous message",
-            tool_schemas=tool_schemas
+            "Hello", context="Previous message", tool_schemas=tool_schemas
         )
 
         # Check section order
@@ -206,12 +203,12 @@ class TestMarkdownStructure:
                     "properties": {
                         "expression": {
                             "type": "string",
-                            "description": "Math expression to evaluate"
+                            "description": "Math expression to evaluate",
                         },
                         "precision": {
                             "type": "number",
-                            "description": "Number of decimal places"
-                        }
+                            "description": "Number of decimal places",
+                        },
                     },
                     "required": ["expression"],
                 },
@@ -282,6 +279,7 @@ class TestPromptIntegration:
 
     def test_llm_provider_integration(self):
         """Test integration with LLM provider-like interface."""
+
         # Create a simple test tool
         class TestTool(BaseTool):
             name: ClassVar[str] = "test_tool"
@@ -306,7 +304,7 @@ class TestPromptIntegration:
 
         # Test getting tool schemas
         tool_schemas = registry.get_tools_schema()
-        
+
         # Test prompt building with structured tools
         template = get_prompt_template()
         prompt = template.build_prompt("Test input", tool_schemas=tool_schemas)
@@ -332,7 +330,7 @@ class TestPromptIntegration:
     def test_markdown_vs_text_efficiency(self):
         """Test that markdown formatting is reasonably efficient."""
         template = PromptTemplate(system_prompt="Brief system prompt")
-        
+
         # Generate a reasonably complex prompt
         tool_schemas = [
             {
@@ -348,7 +346,7 @@ class TestPromptIntegration:
         result = template.build_prompt(
             "What's the weather?",
             context="Previous conversation",
-            tool_schemas=tool_schemas
+            tool_schemas=tool_schemas,
         )
 
         # Should be structured but not excessively verbose

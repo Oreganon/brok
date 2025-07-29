@@ -1,6 +1,7 @@
+
 ---
 globs: "*.py"
-description: "Python coding standards, typing, and testing guidelines"
+description: "Python coding standards, typing, testing guidelines, and quality practices"
 ---
 
 # Python Code Standards
@@ -41,7 +42,7 @@ def process_data(items: List[str], config: Optional[Dict[str, str]] = None) -> D
 - Use descriptive test names that explain the scenario
 - Follow the Arrange-Act-Assert pattern
 - Test both happy path and edge cases
-- Aim for >90% code coverage
+- **Aim for >90% code coverage** - anything less requires justification
 
 Example test:
 ```python
@@ -57,6 +58,26 @@ def test_process_data_with_valid_input_returns_expected_result():
     assert result == expected
 ```
 
+## Development Workflow with Quality Checks
+- **Before any commit**, run this quality sequence:
+  ```bash
+  ruff format .
+  ruff check --fix .
+  mypy .
+  pytest
+  ```
+- **After every 30-50 lines of code**, pause and ask:
+  - "Is this the best approach?"
+  - "Should I refactor this before continuing?"
+  - "Are my tests still passing?"
+
+## Package Management
+- **Always use `uv`** for dependency management
+- Create virtual environments with: `uv venv`
+- Install dependencies with: `uv pip install -e ".[dev]"`
+- Add new dependencies with: `uv add package-name`
+- Never use `pip` when `uv` is available
+
 ## Import Organization
 - Standard library imports first
 - Third-party imports second  
@@ -70,3 +91,10 @@ def test_process_data_with_valid_input_returns_expected_result():
 - Use context managers (`with` statements) for resource management
 - Cache expensive computations with `@functools.lru_cache`
 - Use `logging` module instead of print statements
+
+## Code Quality Mantras
+- **Stop and think**: Every 30-50 lines, pause to reflect
+- **Format first**: Always run `ruff format` before checking other tools
+- **Type safety**: `mypy` should show zero errors
+- **Test everything**: New code without tests is technical debt
+- **Small commits**: Each commit should be a complete, working unit

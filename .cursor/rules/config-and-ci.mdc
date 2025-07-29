@@ -1,6 +1,7 @@
+
 ---
 globs: "pyproject.toml,.pre-commit-config.yaml,.github/workflows/*.yml,.github/workflows/*.yaml"
-description: "Configuration files and CI/CD pipeline standards"
+description: "Configuration files and CI/CD pipeline standards with uv and modern tooling"
 ---
 
 # Configuration & CI/CD Standards
@@ -12,16 +13,18 @@ description: "Configuration files and CI/CD pipeline standards"
 - Use semantic versioning for project version
 - Include comprehensive project description
 - Separate dev dependencies in `[project.optional-dependencies.dev]`
+- Pin Python version to latest stable (currently 3.13+)
 
 ### Tool Configuration
-- **ruff**: Configure both linting and formatting sections
+- **ruff**: Configure both linting and formatting sections with strict rules
 - **mypy**: Enable strict type checking with comprehensive warnings
-- **pytest**: Set up coverage reporting with >90% threshold
+- **pytest**: Set up coverage reporting with **>90% threshold** (not 75%)
 - **coverage**: Exclude test files and virtual environments
 - **bandit**: Configure security scanning exclusions
 
 ### Dependencies
-- Pin major versions for stability
+- Use `uv` for all dependency management - never pip in development
+- Pin major versions for stability in production dependencies
 - Group related dependencies logically
 - Use version ranges for development dependencies
 - Include all necessary development tools
@@ -33,32 +36,116 @@ description: "Configuration files and CI/CD pipeline standards"
 - Code formatting and linting (ruff)
 - Type checking (mypy)
 - Security scanning (bandit)
-- Configuration validation
+- Configuration validation (**Remove poetry hooks** if using uv)
 
 ### Hook Configuration
 - Use latest stable versions for consistency
 - Configure hooks to auto-fix when possible
 - Include additional dependencies for type checking
 - Set appropriate file patterns and exclusions
+- **Important**: Remove poetry-check hook when using uv
 
-## GitHub Actions Workflows
+### Example .pre-commit-config.yaml for uv projects:
+```yaml
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        additional_dependencies: [types-all]
+```
+
+## GitHub Actions Workflows with uv
 
 ### Job Structure
 - Separate jobs for different concerns (lint, test, security)
-- Use matrix strategies for multiple Python versions when needed
-- Cache pip dependencies for faster builds
+- Use **uv for all Python package management** - never pip
+- Cache uv dependencies for faster builds
 - Use official GitHub actions (`actions/checkout@v4`, `actions/setup-python@v5`)
 
-### CI Pipeline Steps
+### CI Pipeline Steps with uv
 1. **Lint and Type Check**: ruff linting/formatting, mypy type checking
 2. **Testing**: pytest execution with coverage reporting
 3. **Security**: bandit security scanning, safety dependency checking
 
+### Modern CI Example with uv:
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-type-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+    
+    - name: Set up Python
+      run: uv python install 3.13
+    
+    - name: Install dependencies
+      run: uv sync --extra dev
+    
+    - name: Run ruff linter
+      run: uv run ruff check .
+    
+    - name: Run ruff formatter
+      run: uv run ruff format --check .
+    
+    - name: Run mypy
+      run: uv run mypy .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+    
+    - name: Set up Python
+      run: uv python install 3.13
+    
+    - name: Install dependencies
+      run: uv sync --extra dev
+    
+    - name: Run tests
+      run: uv run pytest
+```
+
 ### Best Practices
+- **Always use uv instead of pip** in CI environments
 - Pin action versions for reproducibility
 - Use appropriate Python versions matching project requirements
 - Include coverage reporting integration (Codecov)
-- Set up proper caching for dependencies
+- Set up proper caching for uv dependencies
 - Use non-interactive flags for automated environments
 
 ## Configuration Maintenance
@@ -66,3 +153,29 @@ description: "Configuration files and CI/CD pipeline standards"
 - Keep GitHub Actions up to date with latest versions
 - Review and update linting rules periodically
 - Maintain consistency between local and CI environments
+- **Remove legacy pip/poetry configurations** when migrating to uv
+- Update coverage thresholds to >90% (never accept <90% without justification)
+
+## uv-Specific Configurations
+
+### Virtual Environment Management
+```bash
+# Create virtual environment
+uv venv
+
+# Activate (add to your shell profile)
+source .venv/bin/activate
+
+# Install project in development mode
+uv pip install -e ".[dev]"
+
+# Add new dependencies
+uv add package-name
+uv add --group dev pytest-new-plugin
+```
+
+### Lockfile Management
+- Always commit `uv.lock` to version control
+- Use `uv sync` for reproducible installations
+- Use `uv sync --extra dev` for development installations
+- Regularly update with `uv lock --upgrade`
